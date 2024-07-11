@@ -1,0 +1,49 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "/home/ilee0022/cl-gen/CPSD",
+            "justMyCode": true,
+            "args": [
+                "--pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/miniSD-diffusers",
+                "--dataset_path=/home/ilee0022/cl-gen/datasets/imagenet100/huggingface",
+                "--prepared_dataset_path=/home/ilee0022/cl-gen/CPSD/debug/ft_sd/20240704-103810_debug/CI_dataset",
+                "--cpsd_resolution=256",
+                "--cpsd_batch_size=1",
+                "--cpsd_gradient_accumulation_steps=1",
+                "--mixed_precision=fp16",
+                "--cpsd_num_train_epochs=1",
+                "--cpsd_learning_rate=1e-04",
+                "--cpsd_max_grad_norm=1",
+                "--cpsd_lr_scheduler=constant",
+                "--cpsd_lr_warmup_steps=0",
+                "--output_dir=debug/ft_sd",
+                "--num_class=100",
+                "--cpsd_dist_match=0.003",
+                "--cpsd_snr_gamma=5",
+                "--base_task_class_num=2",
+                "--total_task=50",
+                "--n_replay=13000",
+                "--cpsd_scale_lr",
+                "--num_inference_steps=20",
+                "--use_blip",
+                "--c_epochs=3",
+                "--c_lr=0.1",
+                "--c_resolution=224",
+                "--c_batch_size=32",
+                "--c_wd=0.0001",
+                "--c_sam",
+                "--method=replay",
+                "--trainer=lucir"
+            ]
+        }
+    ]
+}
