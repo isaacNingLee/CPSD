@@ -25,18 +25,20 @@ def parse_args():
     parser.add_argument('--c_sam', action='store_true', help='Use SAM for training')
     parser.add_argument('--clip_grad_norm', type=float, default=None, help='Clip gradient norm')
     parser.add_argument('--trainer', type=str, default='normal', choices=['normal', 'dino', 'lucir'], help='Trainer to use')
+    parser.add_argument('--joint_init', action='store_true', help='Initialize joint model')
 
     parser.add_argument('--n_replay', type=int, default=100, help='Number of replay samples per class')
     parser.add_argument('--max_gen_batch_size', type=int, default = 16, help='Maximum batch size for generation')
     parser.add_argument('--num_inference_steps', type=int, default=20, help='Number of inference steps for generation')
     parser.add_argument("--prepared_dataset_path", type=str, default=None, help="Path to prepared dataset (if available)")
+    parser.add_argument("--shared_gen_replay", action='store_true', help="Use shared generator for replay samples")
 
     ## Main args ##
     parser.add_argument('--project_name', type=str, default='CLIP-Projection')
     parser.add_argument('--run_name', type=str, default='debug')
     parser.add_argument('--pretrained_model_name_or_path', type=str, default='/home/ilee0022/cl-gen/models/miniSD-diffusers')
     parser.add_argument('--model_name', type=str, default='miniSD-diffusers')
-    parser.add_argument('--method', type=str, default='cpsd', choices=['cpsd', 'cpsd+', 'replay'], help='Method to use for training')
+    parser.add_argument('--method', type=str, default='cpsd', choices=['cpsd', 'cpsd+', 'cpsd_cont', 'replay'], help='Method to use for training')
 
     ## CPSD args ##
     # data
@@ -62,6 +64,7 @@ def parse_args():
     parser.add_argument('--cpsd_snr_gamma', type=float, help='SNR gamma for loss computation')
     parser.add_argument('--cpsd_dist_match', type=float, default=0.003, help='Distribution matching weight for loss')
     parser.add_argument('--cpsd_scale_lr', action='store_true', help='Scale learning rate by number of GPUs, gradient accumulation steps, and batch size')
+    parser.add_argument('--cpsd_ema', action='store_true', help='Use EMA for training')
 
 
     ## Backbone ##

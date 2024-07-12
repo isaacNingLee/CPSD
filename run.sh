@@ -10,6 +10,7 @@ python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/min
                 --cpsd_max_grad_norm=1 \
                 --cpsd_lr_scheduler=constant \
                 --cpsd_lr_warmup_steps=0 \
+                --cpsd_ema \
                 --output_dir=output \
                 --num_class=100 \
                 --cpsd_dist_match=0.003 \
@@ -25,7 +26,7 @@ python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/min
                 --c_resolution=224 \
                 --c_batch_size=128 \
                 --c_wd=0.0001 \
-                --c_sam \
-                --method=cpsd \
-                --run_name=cpsd_224_lucir_f_sam \
+                --method=cpsd_cont \
+                --run_name=cpsd_cont_224_lucir_f \
                 --trainer=lucir \
+                --shared_gen_replay \

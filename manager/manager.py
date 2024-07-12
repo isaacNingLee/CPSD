@@ -141,10 +141,11 @@ class Manager:
             os.makedirs(self.output_dir + '/CI_dataset')
         with open(self.output_dir + '/CI_dataset/class_to_cl_idx.json', 'w') as f:
             json.dump(class_to_cl_idx, f)
+
         with open(self.output_dir + '/CI_dataset/task_ids.json', 'w') as f:
             json.dump(task_ids, f)
-            return (task_ids, class_to_cl_idx)
-            return (task_ids, class_to_cl_idx)
+
+        return task_ids, class_to_cl_idx
 
     def load_dataset(self):
         self.dataset = load_from_disk(self.dataset_path)
@@ -164,9 +165,14 @@ class Manager:
 
     def sample_clip_proj(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id):
         n_rep_per_class = self.args.n_replay // len(prev_current_task_class_ids)
-        replay_dir = self.args.output_dir + f'/gen_samples/task_{task_id}'
+
+        if self.args.shared_gen_replay:
+            replay_dir = self.args.output_dir + f'/gen_samples'
+        else:
+            replay_dir = self.args.output_dir + f'/gen_samples/task_{task_id}'
         if not os.path.isdir(replay_dir):
             os.makedirs(replay_dir)
+
         filename = []
         labels = []
         text = []
@@ -192,7 +198,12 @@ class Manager:
                 print(f'Generated {generated} samples')
         metadata = {'file_name': filename, 'label': labels, 'text': text, 'ucg': guidance_scale}
         metadata = pd.DataFrame(metadata)
-        metadata.to_csv(replay_dir + '/metadata.csv', index=False)
+
+        # check if metadata file already exists
+        if os.path.exists(replay_dir + '/metadata.csv'):
+            metadata = pd.concat([pd.read_csv(replay_dir + '/metadata.csv'), metadata], ignore_index=True)
+        else:
+            metadata.to_csv(replay_dir + '/metadata.csv', index=False)
         return replay_dir
 
     def prepare_gen_dataset(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id):

@@ -5,11 +5,12 @@ import wandb
 import torch
 import numpy as np
 from manager.manager import Manager
-from cpsd.cpsd import CPSDPipeline, CPSDPlusPipeline
+from cpsd.cpsd import CPSDPipeline, CPSDPlusPipeline, CPSDContPipeline
 from diffusers import DPMSolverMultistepScheduler
 from utils.logger import Logger
 from cpsd.train_cpsd import train_cpsd
 from cpsd.train_cpsd_plus import train_cpsd_plus
+from cpsd.train_cpsd_cont import train_cpsd_cont
 from backbone.backbone import Backbone, DINOBackbone, LUCIRBackbone
 from backbone.train import Trainer, DINOTrainer
 
@@ -42,13 +43,22 @@ else:
     cl_dataset_path = args.prepared_dataset_path
     dataset_manager.load_unique_desc(cl_dataset_path)
 
+
+
 if args.method == 'cpsd':
     pipeline = CPSDPipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
 
 elif args.method == 'cpsd+':
     pipeline = CPSDPlusPipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
+
+elif args.method == 'cpsd_cont':
+    pipeline = CPSDContPipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
+
 else:
     pipeline = CPSDPipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
+
+
+
 
 if pipeline is not None:
     pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
@@ -72,7 +82,7 @@ logger = Logger(setting_str = 'class-il', dataset_str = args.dataset_name, model
 prev_current_ids = []
 test_loader_list = []
 class_range = 0
-batch_size =args.c_batch_size
+batch_size = args.c_batch_size
 for task_id in range(args.total_task):
     print(f'\nTask {task_id} starts.... \n')
 
@@ -93,14 +103,18 @@ for task_id in range(args.total_task):
         elif args.method == 'cpsd+':
             train_cpsd_plus(args, cl_dataset_path+f'/class_{class_id}', class_id)
             torch.cuda.empty_cache()
+
+        elif args.method == 'cpsd_cont':
+            train_cpsd_cont(args, cl_dataset_path+f'/class_{class_id}', class_id)
+            
         elif args.method == 'replay':
             print("No training needed") 
 
 
     print(f'Training Backbone for Task {task_id}')
 
-    train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
-    test_loader_list.append(test_loader)
+    
+
 
     if task_id > 0:
         batch_size = args.c_batch_size // 2
@@ -108,10 +122,26 @@ for task_id in range(args.total_task):
         if args.method == 'replay':
             gen_train_loader, gen_val_loader, _ = dataset_manager.get_current_task_dataloader(prev_current_ids, max_samples=args.n_replay, batch_size = batch_size)
         else:
-            gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(prev_current_ids, pipeline, task_id, batch_size = batch_size)
+
+            if args.shared_gen_replay:
+                replay_ids = current_task_class_ids
+            else:
+                replay_ids = prev_current_ids
+                
+            gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size)
+
+    elif args.joint_init:
+        batch_size = args.c_batch_size // 2
+        gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(prev_current_ids + current_task_class_ids, pipeline, task_id, batch_size = batch_size)
+        train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
+
     
     else:
         gen_train_loader, gen_val_loader = None, None
+        train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
+
+
+    test_loader_list.append(test_loader)
 
     trainer.train(task_id, task_ids, train_loader, val_loader, test_loader_list, gen_train_loader, gen_val_loader)
 
