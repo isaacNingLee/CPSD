@@ -67,6 +67,7 @@ class LUCIRBackbone(Backbone):
         self.lambda_cos_sim = 0
         self.pc = 0
         self.nc = 0
+        self.task_id = 0
 
         self.k_mr = 2
         self.mr_margin = 0.5
@@ -77,6 +78,7 @@ class LUCIRBackbone(Backbone):
 
     def add_task(self, num_new_classes, device):
         self.pc += self.nc
+        self.task_id += 1
         self.nc = num_new_classes
         self.weights.append(nn.Parameter(torch.Tensor(num_new_classes, self.in_features)).to(device))
         self.reset_parameters()
@@ -138,24 +140,57 @@ class LUCIRBackbone(Backbone):
             y_hat = self.noscale_forward(z_hat) * self.sigma
             loss = self.criterion(y_hat, y_cat)
 
-            z_hat = z_hat.reshape(z_hat.size(0), -1)
+            if self.task_id > 0:
+                z_hat_rep = z_hat.reshape(z_hat.size(0), -1)
 
-            with torch.no_grad():
+                with torch.no_grad():
+                    
+                    logits = self.old_net(x_cat)
+
+                    # old_pred = self.old_fc(logits)
+                    logits = logits.reshape(logits.size(0), -1)
+
+                    
+
+                loss2 = F.cosine_embedding_loss(
+                    z_hat_rep, logits.detach(), torch.ones(z_hat_rep.shape[0]).to(z_hat_rep.device)) * self.lambda_cos_sim
+
+                loss3 = self.lucir_batch_hard_triplet_loss(
+                    y_cat, y_hat, self.k_mr, self.mr_margin, self.pc) * self.lambda_mr
+
+                #loss4 = self.criterion(old_pred, gen_y)
                 
-                logits = self.old_net(x_cat)
-                logits = logits.reshape(logits.size(0), -1)
+                loss += loss2 + loss3
 
-            loss2 = F.cosine_embedding_loss(
-                z_hat, logits.detach(), torch.ones(z_hat.shape[0]).to(z_hat.device)) * self.lambda_cos_sim
-
-            loss3 = self.lucir_batch_hard_triplet_loss(
-                y_cat, y_hat, self.k_mr, self.mr_margin, self.pc) * self.lambda_mr
             
-            loss += loss2 + loss3
+            fool_loss = self.fool_loss(z_hat, y, gen_y) * self.lambda_mr 
+            loss += fool_loss
 
             acc = (y_hat.argmax(dim=1) == y_cat).float().mean()
 
         return loss, acc
+
+    def fool_loss(self, z_hat, y, gen_y):
+
+        len_x = len(y)
+
+        z_hat_x = z_hat[:len_x, :]
+        z_hat_gen_x = z_hat[len_x:, :]
+
+        # Compute pairwise cosine similarity
+        z_hat_x_norm = F.normalize(z_hat_x, p=2, dim=1)
+        z_hat_gen_x_norm = F.normalize(z_hat_gen_x, p=2, dim=1)
+        cosine_sim = torch.mm(z_hat_x_norm, z_hat_gen_x_norm.t())
+
+        # Create labels for contrastive loss
+        positive_pairs = (y.unsqueeze(1) == gen_y.unsqueeze(0)).float()
+
+        # Compute contrastive loss
+        margin = 1.0  # Margin for contrastive loss
+        fool_loss = (1 - positive_pairs) * F.relu(margin - cosine_sim) + positive_pairs * (1 - cosine_sim)
+        fool_loss = fool_loss.mean()
+
+        return fool_loss
 
     def lucir_batch_hard_triplet_loss(self, labels, embeddings, k, margin, num_old_classes):
         """

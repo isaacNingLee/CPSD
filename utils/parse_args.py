@@ -56,6 +56,7 @@ def parse_args():
     parser.add_argument('--cpsd_adam_weight_decay', type=float, default=0.01, help='Weight decay for Adam optimizer')
     parser.add_argument('--cpsd_adam_epsilon', type=float, default=1e-8, help='Epsilon for Adam optimizer')
     parser.add_argument('--cpsd_resolution', type=int, default=256, help='Resolution for input images')
+    parser.add_argument('--cpsd_ema_alpha', type=float, default=0.5, help='EMA alpha for model')
     
     parser.add_argument('--cpsd_lr_scheduler', type=str, default='constant', help='Learning rate scheduler')
     parser.add_argument('--cpsd_lr_warmup_steps', type=int, default=0, help='Warmup steps for learning rate scheduler')

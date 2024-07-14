@@ -202,8 +202,8 @@ class Manager:
         # check if metadata file already exists
         if os.path.exists(replay_dir + '/metadata.csv'):
             metadata = pd.concat([pd.read_csv(replay_dir + '/metadata.csv'), metadata], ignore_index=True)
-        else:
-            metadata.to_csv(replay_dir + '/metadata.csv', index=False)
+        metadata.to_csv(replay_dir + '/metadata.csv', index=False)
+
         return replay_dir
 
     def prepare_gen_dataset(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id):

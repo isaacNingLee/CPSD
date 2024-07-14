@@ -102,21 +102,30 @@ for task_id in range(args.total_task):
 
         elif args.method == 'cpsd+':
             train_cpsd_plus(args, cl_dataset_path+f'/class_{class_id}', class_id)
-            torch.cuda.empty_cache()
+            
 
         elif args.method == 'cpsd_cont':
             train_cpsd_cont(args, cl_dataset_path+f'/class_{class_id}', class_id)
             
         elif args.method == 'replay':
-            print("No training needed") 
+            print("No training needed")
+        torch.cuda.empty_cache() 
 
 
     print(f'Training Backbone for Task {task_id}')
 
-    
+    if args.joint_init:
+        batch_size = args.c_batch_size // 2
+        if args.shared_gen_replay:
+            replay_ids = current_task_class_ids
+        else:
+            replay_ids = prev_current_ids + current_task_class_ids
+
+        gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size)
+        train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
 
 
-    if task_id > 0:
+    elif task_id > 0:
         batch_size = args.c_batch_size // 2
 
         if args.method == 'replay':
@@ -129,11 +138,6 @@ for task_id in range(args.total_task):
                 replay_ids = prev_current_ids
                 
             gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size)
-
-    elif args.joint_init:
-        batch_size = args.c_batch_size // 2
-        gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(prev_current_ids + current_task_class_ids, pipeline, task_id, batch_size = batch_size)
-        train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
 
     
     else:

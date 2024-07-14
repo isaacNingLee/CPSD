@@ -112,7 +112,7 @@ class CPSDContPipeline(CPSDPipeline):
         self.cpsd_mean = loaded_dict['cpsd_mean']
         self.cpsd_std = loaded_dict['cpsd_std']
 
-        self.embed_trans = loaded_dict['embed']
+        self.embed_trans = loaded_dict['embed'].to(torch.float16)
 
     def prepare_latents(self, batch_size, num_channels_latents, height, width, dtype, device, generator, latents=None):
         shape = (

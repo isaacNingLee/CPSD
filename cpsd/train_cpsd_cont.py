@@ -75,8 +75,8 @@ class WelfordStats:
         self.n += bs
 
         if self.mu is None:
-            self.mu = torch.zeros_like(x).to(x.device)
-            self.sigma2 = torch.zeros_like(x).to(x.device)
+            self.mu = torch.zeros_like(x[0]).to(x.device)
+            self.sigma2 = torch.zeros_like(x[0]).to(x.device)
 
         for i in range(bs):
             delta = x[i] - self.mu
@@ -85,6 +85,10 @@ class WelfordStats:
             self.sigma2 += delta * delta2
 
     def get_stats(self):
+        
+        if self.n == 0:
+            print("Warning: No data to compute stats.")
+            return self.mu, self.sigma2  # Return None or zeros if no updates have been made
         return self.mu, torch.sqrt(self.sigma2 / self.n)
         
 
@@ -443,7 +447,8 @@ def train_cpsd_cont(args, train_data_dir, class_id):
     if accelerator.is_main_process:
         if args.output_dir + f'/cp_embeddings' is not None:
             os.makedirs(args.output_dir + f'/cp_embeddings', exist_ok=True)
-        mu, std = stats.get_stats
+
+        mu, std = stats.get_stats()
         save_dict = {
             "embed": embed_trans,
             "cpsd_mean": mu,

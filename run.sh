@@ -26,7 +26,9 @@ python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/min
                 --c_resolution=224 \
                 --c_batch_size=128 \
                 --c_wd=0.0001 \
-                --method=cpsd_cont \
-                --run_name=cpsd_cont_224_lucir_f \
+                --method=cpsd \
+                --run_name=cpsd_224_lucir_fm3_joint_cg \
                 --trainer=lucir \
                 --shared_gen_replay \
+                --joint_init \
+                --clip_grad_norm=1.0 \

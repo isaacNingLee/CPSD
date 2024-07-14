@@ -8,7 +8,7 @@
 # NOTE: To activate a SLURM option, remove the whitespace between the '#' and 'SBATCH'
 
 # To give your job a name, replace "MyJob" with an appropriate name
-#SBATCH --job-name=ilee_cp_cpsd_cont_exp_224_lucir_f
+#SBATCH --job-name=ilee_cp_cpsd_224_lucir_fm3_joint_cg
 
 # Request CPU resource for a serial job
 # SBATCH --ntasks=1
@@ -26,10 +26,10 @@
 #SBATCH --mem-per-cpu=60000
 
 # Set the file for output (stdout)
-#SBATCH --output=logs/cp_cpsd_cont_exp_224_lucir_f.out
+#SBATCH --output=logs/cp_cpsd_224_lucir_fm3_joint_cg.out
 
 # Set the file for error log (stderr)
-#SBATCH --error=logs/cp_cpsd_cont_exp_224_lucir_f.err
+#SBATCH --error=logs/cp_cpsd_224_lucir_fm3_joint_cg.err
 
 
 # Command to run
