@@ -11,10 +11,10 @@ from utils.logger import Logger
 from cpsd.train_cpsd import train_cpsd
 from cpsd.train_cpsd_plus import train_cpsd_plus
 from cpsd.train_cpsd_cont import train_cpsd_cont
-from backbone.backbone import Backbone, DINOBackbone, LUCIRBackbone
-from backbone.train import Trainer, DINOTrainer
+from backbone.backbone import Backbone, DINOBackbone, LUCIRBackbone, AnnealingBackbone
+from backbone.train import Trainer, DINOTrainer, AnnealTrainer
 
-
+os.environ['wandb_api_key'] = '67265bb3f10a02ce2167c5006180fd57e2598daa'
 args = parse_args()
 
 args.output_dir = args.output_dir + f'/{time.strftime("%Y%m%d-%H%M%S")}' + f'_{args.run_name}'
@@ -28,8 +28,6 @@ np.random.seed(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 generator_seed = torch.Generator().manual_seed(args.seed)
-
-
 
 wandb.init(project=args.project_name, name=args.run_name)
 wandb.log(vars(args))
@@ -68,9 +66,14 @@ if pipeline is not None:
 if args.trainer == 'dino':
     backbone = DINOBackbone(args.num_classes, pipeline, args.c_resolution).to(device)
     trainer = DINOTrainer(args, backbone, device)
+
+elif args.trainer == 'anneal':
+    backbone = AnnealingBackbone(args.num_classes, args.anti_discrim).to(device)
+    trainer = AnnealTrainer(args, backbone, device)
+
 else:
     if args.trainer == 'lucir':
-        backbone = LUCIRBackbone(args.num_classes).to(device)
+        backbone = LUCIRBackbone(args.num_classes, zap_p = args.c_zap_p).to(device)
     else:
         backbone = Backbone(args.num_classes).to(device)
     trainer = Trainer(args, backbone, device)
@@ -93,23 +96,26 @@ for task_id in range(args.total_task):
     backbone.set_class_range(class_range)
     current_task_class_ids = task_ids[task_id]
     
+    if args.prepared_gen_dataset_path is None and args.prepared_cpsd_path is None:
 
-    for class_id in current_task_class_ids:
-        print(f'Training CLIP Projection for Class {class_id}')
+        for class_id in current_task_class_ids:
+            print(f'Training CLIP Projection for Class {class_id}')
 
-        if args.method == 'cpsd':
-            train_cpsd(args, cl_dataset_path+f'/class_{class_id}', class_id)
+            if args.method == 'cpsd':
+                train_cpsd(args, cl_dataset_path+f'/class_{class_id}', class_id)
 
-        elif args.method == 'cpsd+':
-            train_cpsd_plus(args, cl_dataset_path+f'/class_{class_id}', class_id)
+            elif args.method == 'cpsd+':
+                train_cpsd_plus(args, cl_dataset_path+f'/class_{class_id}', class_id)
+                
+
+            elif args.method == 'cpsd_cont':
+                train_cpsd_cont(args, cl_dataset_path+f'/class_{class_id}', class_id)
+
             
-
-        elif args.method == 'cpsd_cont':
-            train_cpsd_cont(args, cl_dataset_path+f'/class_{class_id}', class_id)
-            
-        elif args.method == 'replay':
-            print("No training needed")
-        torch.cuda.empty_cache() 
+                
+            elif args.method == 'replay':
+                print("No training needed")
+            torch.cuda.empty_cache() 
 
 
     print(f'Training Backbone for Task {task_id}')
@@ -124,6 +130,31 @@ for task_id in range(args.total_task):
         gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size)
         train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
 
+    elif args.syn_only:
+        
+        train_loader, val_loader = dataset_manager.get_gen_dataloader(current_task_class_ids, pipeline, task_id, batch_size = batch_size)
+        _, _, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
+        gen_train_loader, gen_val_loader = None, None
+
+    elif args.trainer == 'anneal':
+
+        batch_size = args.c_batch_size // 2
+        if args.shared_gen_replay and not args.prepared_gen_dataset_path:
+            replay_ids = current_task_class_ids
+
+            if task_id == 0:
+
+                _, _ = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size) # just to let it generate the replay samples
+                gen_train_loader, gen_val_loader = None, None
+        else:
+            replay_ids = prev_current_ids + current_task_class_ids
+
+        if task_id > 0:
+            gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size)
+        else:
+            gen_train_loader, gen_val_loader = None, None
+        
+        train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
 
     elif task_id > 0:
         batch_size = args.c_batch_size // 2
@@ -132,17 +163,19 @@ for task_id in range(args.total_task):
             gen_train_loader, gen_val_loader, _ = dataset_manager.get_current_task_dataloader(prev_current_ids, max_samples=args.n_replay, batch_size = batch_size)
         else:
 
-            if args.shared_gen_replay:
-                replay_ids = current_task_class_ids
-            else:
-                replay_ids = prev_current_ids
-                
+
+            replay_ids = prev_current_ids
+
             gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size)
+            train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
 
     
     else:
+        
         gen_train_loader, gen_val_loader = None, None
         train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
+
+
 
 
     test_loader_list.append(test_loader)

@@ -64,6 +64,59 @@ else:
 
 logger = get_logger(__name__)
 
+class ContrastiveLoss(torch.nn.Module):
+    def __init__(self, margin=1.0):
+        super(ContrastiveLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, hidden_states):
+        # check if hidden states is in (bs, -1)
+        if hidden_states.dim() != 2:
+            hidden_states = hidden_states.view(hidden_states.size(0), -1)
+
+        batch_size = hidden_states.size(0)
+        pairwise_distances = torch.cdist(hidden_states, hidden_states, p=2)  # Compute pairwise distances
+
+        # Create a mask to ignore the diagonal (distance with itself)
+        mask = torch.eye(batch_size, device=hidden_states.device).bool()
+        pairwise_distances = pairwise_distances[~mask].view(batch_size, -1)
+
+        # Compute the contrastive loss
+        contrastive_loss = F.relu(self.margin - pairwise_distances).mean()
+
+        return contrastive_loss
+
+class CosineContrastiveLoss(torch.nn.Module):
+
+    def __init__(self, margin=0.5):
+        super(CosineContrastiveLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, hidden_states):
+        # Check if hidden states is in (bs, -1)
+        if hidden_states.dim() != 2:
+            hidden_states = hidden_states.view(hidden_states.size(0), -1)
+
+        batch_size = hidden_states.size(0)
+
+        # Normalize hidden states
+        hidden_states = F.normalize(hidden_states, p=2, dim=1)
+
+        # Compute pairwise cosine similarity
+        cosine_similarity = torch.mm(hidden_states, hidden_states.t())
+
+        # Convert to cosine distance
+        cosine_distance = 1 - cosine_similarity
+
+        # Create a mask to ignore the diagonal (distance with itself)
+        mask = torch.eye(batch_size, device=hidden_states.device).bool()
+        cosine_distance = cosine_distance[~mask].view(batch_size, -1)
+
+        # Compute the contrastive loss
+        contrastive_loss = F.relu(self.margin - cosine_distance).mean()
+
+        return contrastive_loss
+
 def train_cpsd(args, train_data_dir, class_id):
 
     logging_dir = os.path.join(args.output_dir, 'cpsd_logs')
@@ -203,7 +256,7 @@ def train_cpsd(args, train_data_dir, class_id):
     train_transforms = transforms.Compose(
         [
             transforms.Resize(args.cpsd_resolution, antialias=True),
-            transforms.CenterCrop(args.cpsd_resolution),
+            transforms.RandomResizedCrop(args.c_resolution, scale=(0.6, 1.0), interpolation=PIL_INTERPOLATION["lanczos"]),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
@@ -302,7 +355,7 @@ def train_cpsd(args, train_data_dir, class_id):
         # Only show the progress bar once on each machine.
         disable=not accelerator.is_local_main_process,
     )
-
+    contrastive_loss_fn = CosineContrastiveLoss(margin=0.2)
     for epoch in range(first_epoch, args.cpsd_num_train_epochs):
         train_loss = 0.0
         for step, batch in enumerate(train_dataloader):
@@ -361,13 +414,18 @@ def train_cpsd(args, train_data_dir, class_id):
                     loss = loss.mean()
 
                 
-
+                dist_loss = 0
                 if args.cpsd_dist_match:
                     mse_loss_weights = mse_loss_weights.view(bsz, 1, 1, 1)
                     model_pred_ws = (model_pred.float() * mse_loss_weights).sum(dim=0)
                     target_ws = (target.float() * mse_loss_weights).sum(dim=0)
                     dist_loss = F.mse_loss(model_pred_ws, target_ws, reduction="mean") 
                     loss = loss + dist_loss * args.cpsd_dist_match
+
+                contrastive_loss = 0
+                if args.cpsd_contrastive_loss:
+                    contrastive_loss = contrastive_loss_fn(encoder_hidden_states)
+                    loss += contrastive_loss * args.cpsd_contrastive_loss
 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(args.cpsd_batch_size)).mean()
@@ -389,7 +447,7 @@ def train_cpsd(args, train_data_dir, class_id):
                 train_loss = 0.0
 
 
-            logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+            logs = {"step_loss": loss.detach().item(), "dist_loss": dist_loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
 
 

@@ -16,6 +16,7 @@ def parse_args():
     parser.add_argument('--total_task', type=int, default=10)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--use_blip', action='store_true', help='Use BLIP for training')
+    parser.add_argument('--v2_desc', action='store_true', help='Use v2 descriptions')
     parser.add_argument('--c_resolution', type=int, default=32)
     parser.add_argument('--c_batch_size', type=int, default=32, help='Batch size for current task')
     parser.add_argument('--c_lr', type=float, default=2e-4, help='Learning rate for current task')
@@ -23,15 +24,23 @@ def parse_args():
     parser.add_argument('--c_wd', type=float, default=0.9, help='Weight decay for current task')
     parser.add_argument('--c_ema', action='store_true', help='Use EMA for training')
     parser.add_argument('--c_sam', action='store_true', help='Use SAM for training')
+    parser.add_argument('--c_zap_p', type=float, default=None, help='Probability of zapping weights')
+    parser.add_argument('--c_dino', action='store_true', help='Use DINO for generation')
     parser.add_argument('--clip_grad_norm', type=float, default=None, help='Clip gradient norm')
-    parser.add_argument('--trainer', type=str, default='normal', choices=['normal', 'dino', 'lucir'], help='Trainer to use')
+    parser.add_argument('--trainer', type=str, default='normal', choices=['normal', 'dino', 'lucir', 'anneal'], help='Trainer to use')
     parser.add_argument('--joint_init', action='store_true', help='Initialize joint model')
+    parser.add_argument('--syn_only', action='store_true', help='Only use synthetic data for training')
+    parser.add_argument('--anti_discrim', action='store_true', help='Use anti-discriminator')
+    parser.add_argument('--c_anneal_epochs', type=int, default=5, help='Number of annealing epochs')
+    parser.add_argument('--init_option', type=str, default='random', choices=['random','old', 'new', 'mean', 'norm_mean'], help='Initialization option')
 
     parser.add_argument('--n_replay', type=int, default=100, help='Number of replay samples per class')
     parser.add_argument('--max_gen_batch_size', type=int, default = 16, help='Maximum batch size for generation')
     parser.add_argument('--num_inference_steps', type=int, default=20, help='Number of inference steps for generation')
     parser.add_argument("--prepared_dataset_path", type=str, default=None, help="Path to prepared dataset (if available)")
     parser.add_argument("--shared_gen_replay", action='store_true', help="Use shared generator for replay samples")
+    parser.add_argument("--prepared_gen_dataset_path", type=str, default=None, help="Path to prepared dataset for generator (if available)")
+    parser.add_argument("--prepared_cpsd_path", type=str, default=None, help="Path to prepared CPSD model (if available)")
 
     ## Main args ##
     parser.add_argument('--project_name', type=str, default='CLIP-Projection')
@@ -66,7 +75,7 @@ def parse_args():
     parser.add_argument('--cpsd_dist_match', type=float, default=0.003, help='Distribution matching weight for loss')
     parser.add_argument('--cpsd_scale_lr', action='store_true', help='Scale learning rate by number of GPUs, gradient accumulation steps, and batch size')
     parser.add_argument('--cpsd_ema', action='store_true', help='Use EMA for training')
-
+    parser.add_argument('--cpsd_contrastive_loss', type=float, default=None, help='Contrastive loss weight')
 
     ## Backbone ##
     parser.add_argument('--dataloader_num_workers', type=int, default=4, help='Number of workers for dataloader')

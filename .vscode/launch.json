@@ -31,18 +31,22 @@
                 "--cpsd_snr_gamma=5",
                 "--base_task_class_num=2",
                 "--total_task=50",
-                "--n_replay=13000",
+                "--n_replay=260",
                 "--cpsd_scale_lr",
                 "--num_inference_steps=20",
                 "--use_blip",
-                "--c_epochs=3",
+                "--c_epochs=5",
                 "--c_lr=0.1",
                 "--c_resolution=224",
                 "--c_batch_size=32",
                 "--c_wd=0.0001",
-                "--c_sam",
-                "--method=replay",
-                "--trainer=lucir"
+                "--method=cpsd",
+                "--trainer=anneal",
+                "--v2_desc",
+                "--anti_discrim",
+                "--shared_gen_replay",
+                "--max_gen_batch_size=4",
+                "--c_anneal_epochs=2",
             ]
         }
     ]

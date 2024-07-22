@@ -1,11 +1,12 @@
 python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/miniSD-diffusers \
                 --dataset_path=/home/ilee0022/cl-gen/datasets/imagenet100/huggingface \
-                --prepared_dataset_path=/home/ilee0022/cl-gen/CPSD/debug/ft_sd/20240704-103810_debug/CI_dataset \
+                --prepared_dataset_path=/home/ilee0022/cl-gen/CPSD/output/20240715-035354_cp_cpsd_c_224_lucir_f_new/CI_dataset \
+                --prepared_gen_dataset_path=/home/ilee0022/cl-gen/CPSD/output/20240721-232127_cp_cpsd_224_anneal_mix_init/gen_samples \
                 --cpsd_resolution=256 \
                 --cpsd_batch_size=4 \
                 --cpsd_gradient_accumulation_steps=1 \
                 --mixed_precision=fp16 \
-                --cpsd_num_train_epochs=3 \
+                --cpsd_num_train_epochs=1 \
                 --cpsd_learning_rate=1e-04 \
                 --cpsd_max_grad_norm=1 \
                 --cpsd_lr_scheduler=constant \
@@ -27,8 +28,11 @@ python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/min
                 --c_batch_size=128 \
                 --c_wd=0.0001 \
                 --method=cpsd \
-                --run_name=cpsd_224_lucir_fm3_joint_cg \
-                --trainer=lucir \
+                --run_name=cp_cpsd_224_anneal_nm_init_ad \
+                --trainer=anneal \
                 --shared_gen_replay \
-                --joint_init \
-                --clip_grad_norm=1.0 \
+                --max_gen_batch_size=4 \
+                --v2_desc \
+                --c_anneal_epochs=10 \
+                --anti_discrim \
+                --init_option=norm_mean \

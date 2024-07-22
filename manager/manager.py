@@ -36,18 +36,35 @@ class Manager:
             self.label2text = json.load(f)
         self.use_blip = args.use_blip
 
-        if args.use_blip:
+        if args.use_blip and not args.prepared_dataset_path:
             self.processor = Blip2Processor.from_pretrained('Salesforce/blip2-opt-2.7b', cache_dir='.cache')
             self.blip = Blip2ForConditionalGeneration.from_pretrained('Salesforce/blip2-opt-2.7b', cache_dir='.cache', torch_dtype=torch.float16).to(device)
+        else:
+            self.processor = None
+            self.blip = None
 
         self.device = device
 
-        self._train_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True), 
+
+        if not args.c_dino:
+            self._train_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True, interpolation=Image.LANCZOS), 
                                                      transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1), 
                                                      transforms.RandomHorizontalFlip(p=0.5), 
-                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.6, 1.0), interpolation=Image.BICUBIC), 
+                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.6, 1.0), interpolation=Image.LANCZOS, antialias=True), 
                                                      transforms.ToTensor(), 
                                                      transforms.Normalize(mean=[0.5], std=[0.5])])
+        else:
+            self._train_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True), 
+                                                     transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1), 
+                                                     transforms.RandomSolarize(0.2),
+                                                     transforms.RandomHorizontalFlip(p=0.5), 
+                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.6, 1.0), interpolation=Image.BICUBIC), 
+                                                     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05), 
+                                                     transforms.RandomSolarize(0.1),
+                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.8, 1.0), interpolation=Image.BICUBIC), 
+                                                     transforms.ToTensor(), 
+                                                     transforms.Normalize(mean=[0.5], std=[0.5]),
+                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.2, 0.6), interpolation=Image.BICUBIC)])
         
         self._val_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True), transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
 
@@ -170,22 +187,28 @@ class Manager:
             replay_dir = self.args.output_dir + f'/gen_samples'
         else:
             replay_dir = self.args.output_dir + f'/gen_samples/task_{task_id}'
+            
         if not os.path.isdir(replay_dir):
-            os.makedirs(replay_dir)
+            os.makedirs(replay_dir, exist_ok=True)
 
         filename = []
         labels = []
         text = []
         guidance_scale = []
         for class_id in prev_current_task_class_ids:
-            pipeline.load_embed_trans(self.args.output_dir + f'/cp_embeddings/class_{class_id}.pt')
+            
+            if self.args.prepared_cpsd_path:
+                pipeline.load_embed(self.args.prepared_cpsd_path + f'/class_{class_id}.pt')
+            else:
+                pipeline.load_embed_trans(self.args.output_dir + f'/cp_embeddings/class_{class_id}.pt')
+
             prompts = [f"{self.label2text[str(class_id)].split(',')[0]}, {random.choice(self.unique_desc[class_id])}" for _ in range(n_rep_per_class)]
             replay_path = replay_dir + f'/class_{class_id}'
             generated = 0
             print(f'Generating {len(prompts)} samples for class {class_id}.....')
             while generated < len(prompts):
                 batch_size = min(self.args.max_gen_batch_size, len(prompts) - generated)
-                rnd_guidance_scale = np.random.uniform(3, 9)
+                rnd_guidance_scale = np.random.uniform(5, 9)
                 guidance_scale.extend([rnd_guidance_scale] * batch_size)
                 images = pipeline(prompts[generated:generated + batch_size], num_inference_steps=self.args.num_inference_steps, width=self.args.cpsd_resolution, height=self.args.cpsd_resolution, guidance_scale=rnd_guidance_scale).images
                 for i, img in enumerate(images):
@@ -208,8 +231,18 @@ class Manager:
 
     def prepare_gen_dataset(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id):
         print(f'Preparing dataset for CLIP projection for task {task_id}....')
-        replay_dir = self.sample_clip_proj(prev_current_task_class_ids, pipeline, task_id)
-        dataset = load_dataset('imagefolder', data_dir=replay_dir)
+
+        if self.args.prepared_gen_dataset_path:
+            dataset = load_dataset('imagefolder', data_dir=self.args.prepared_gen_dataset_path)
+
+            for phase in ['train', 'validation', 'test']:
+                indices = torch.nonzero(torch.isin(torch.tensor(self.dataset[phase]['label']), torch.tensor(prev_current_task_class_ids))).squeeze()
+
+                dataset[phase] = deepcopy(dataset[phase].select(indices))
+        else:
+            replay_dir = self.sample_clip_proj(prev_current_task_class_ids, pipeline, task_id)
+            dataset = load_dataset('imagefolder', data_dir=replay_dir)
+
         dataset = dataset['train'].train_test_split(test_size=self.val_ratio, seed=self.args.seed, shuffle=True)
         dataset['validation'] = dataset['test']
         dataset.pop('test')
@@ -226,25 +259,49 @@ class Manager:
         return (gen_dataloader['train'], gen_dataloader['validation'])
 
     def prepare_clip_proj_dataset(self):
+
         print('Preparing dataset for CLIP projection...')
+
         if self.use_blip:
             self.unique_desc = {}
+
+
         if not os.path.exists(self.output_dir + '/CI_dataset'):
             os.makedirs(self.output_dir + '/CI_dataset')
+
+
         for i in tqdm.tqdm(range(self.num_classes)):
             indices = torch.nonzero(torch.tensor(self.dataset['train']['label']) == i).squeeze()
             images = self.dataset['train'][indices]['image']
             text = self.label2text[str(i)].split(',')[0]
+
+
             if self.use_blip:
                 desc = []
                 nbatch = math.ceil(len(images) / 32)
                 for j in range(nbatch):
                     batch_images = images[j * 32:(j + 1) * 32]
-                    batch_text = [f'{text},'] * len(batch_images)
+
+                    if self.args.v2_desc:
+                        if random.random() > 0.67:
+                            template = '{},background of'
+                        elif random.random() > 0.33:
+                            template = '{},with'
+                        else:
+                            template = '{},'
+                    else:
+                        template = '{},'
+
+                    
+                    batch_text = [template.format(text)] * len(batch_images)
+                    add_template_text = template.split(',')[1]
+
                     inputs = self.processor(batch_images, batch_text, return_tensors='pt').to(self.device, torch.float16)
                     outputs = self.blip.generate(**inputs)
                     decoded_outputs = self.processor.batch_decode(outputs, skip_special_tokens=True)
-                    desc.extend((out.strip() for out in decoded_outputs))
+                    desc.extend((f'{add_template_text} {out.strip()}' for out in decoded_outputs))
+
+
                 data = {'image': images, 'text': [text] * len(images), 'label': [self.class2cl[i]] * len(images), 'desc': desc}
                 task_dataset = Dataset.from_dict(data)
                 task_dataset.save_to_disk(self.output_dir + f'/CI_dataset/class_{i}')
@@ -257,6 +314,7 @@ class Manager:
                 task_dataset.save_to_disk(self.output_dir + f'/CI_dataset/class_{i}')
 
     def load_unique_desc(self, prepared_dataset_path):
+
         print('Loading unique descriptions for each class...')
         self.unique_desc = {}
         for i in range(self.num_classes):
