@@ -181,7 +181,7 @@ class Manager:
         self.val_ratio = len(self.dataset['validation']) / len(self.dataset['train'])
 
     def sample_clip_proj(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id):
-        n_rep_per_class = self.args.n_replay // len(prev_current_task_class_ids)
+        n_rep_per_class = self.args.n_replay
 
         if self.args.shared_gen_replay:
             replay_dir = self.args.output_dir + f'/gen_samples'
@@ -235,8 +235,9 @@ class Manager:
         if self.args.prepared_gen_dataset_path:
             dataset = load_dataset('imagefolder', data_dir=self.args.prepared_gen_dataset_path)
 
-            for phase in ['train', 'validation', 'test']:
-                indices = torch.nonzero(torch.isin(torch.tensor(self.dataset[phase]['label']), torch.tensor(prev_current_task_class_ids))).squeeze()
+            for phase in dataset.keys():
+                indices = torch.nonzero(torch.isin(torch.tensor(dataset[phase]['label']), torch.tensor(prev_current_task_class_ids))).squeeze()
+                
 
                 dataset[phase] = deepcopy(dataset[phase].select(indices))
         else:
@@ -247,6 +248,12 @@ class Manager:
         dataset['validation'] = dataset['test']
         dataset.pop('test')
         dataset = self.dataset_preparation(dataset)
+
+        for phase in dataset.keys():
+            if len(dataset[phase]) > self.args.max_replay_set_size:
+                indices = torch.randperm(len(dataset[phase]))[:self.args.max_replay_set_size]
+                dataset[phase] = deepcopy(dataset[phase].select(indices.tolist()))
+
         return dataset
 
     def get_gen_dataloader(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id, batch_size):

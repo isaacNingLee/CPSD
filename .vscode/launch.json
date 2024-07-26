@@ -16,6 +16,7 @@
                 "--pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/miniSD-diffusers",
                 "--dataset_path=/home/ilee0022/cl-gen/datasets/imagenet100/huggingface",
                 "--prepared_dataset_path=/home/ilee0022/cl-gen/CPSD/debug/ft_sd/20240704-103810_debug/CI_dataset",
+                "--prepared_gen_dataset_path=/home/ilee0022/cl-gen/CPSD/output/20240721-232127_cp_cpsd_224_anneal_mix_init/gen_samples",
                 "--cpsd_resolution=256",
                 "--cpsd_batch_size=1",
                 "--cpsd_gradient_accumulation_steps=1",
@@ -41,12 +42,13 @@
                 "--c_batch_size=32",
                 "--c_wd=0.0001",
                 "--method=cpsd",
-                "--trainer=anneal",
+                "--trainer=anneal+",
                 "--v2_desc",
                 "--anti_discrim",
                 "--shared_gen_replay",
                 "--max_gen_batch_size=4",
                 "--c_anneal_epochs=2",
+                "--init_option=mean",
             ]
         }
     ]

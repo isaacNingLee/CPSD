@@ -1,5 +1,4 @@
 import argparse
-import os
 
 def parse_args():
 
@@ -27,14 +26,16 @@ def parse_args():
     parser.add_argument('--c_zap_p', type=float, default=None, help='Probability of zapping weights')
     parser.add_argument('--c_dino', action='store_true', help='Use DINO for generation')
     parser.add_argument('--clip_grad_norm', type=float, default=None, help='Clip gradient norm')
-    parser.add_argument('--trainer', type=str, default='normal', choices=['normal', 'dino', 'lucir', 'anneal'], help='Trainer to use')
+    parser.add_argument('--trainer', type=str, default='normal', choices=['normal', 'dino', 'lucir', 'anneal', 'anneal+'], help='Trainer to use')
     parser.add_argument('--joint_init', action='store_true', help='Initialize joint model')
     parser.add_argument('--syn_only', action='store_true', help='Only use synthetic data for training')
     parser.add_argument('--anti_discrim', action='store_true', help='Use anti-discriminator')
     parser.add_argument('--c_anneal_epochs', type=int, default=5, help='Number of annealing epochs')
-    parser.add_argument('--init_option', type=str, default='random', choices=['random','old', 'new', 'mean', 'norm_mean'], help='Initialization option')
+    parser.add_argument('--init_option', type=str, default='random', choices=['random','old', 'new', 'mean', 'mean_d', 'norm_mean', 'norm_mean_static','c_dino'], help='Initialization option')
+
 
     parser.add_argument('--n_replay', type=int, default=100, help='Number of replay samples per class')
+    parser.add_argument('--max_replay_set_size', type=int, default=50000, help='Maximum size of replay set')
     parser.add_argument('--max_gen_batch_size', type=int, default = 16, help='Maximum batch size for generation')
     parser.add_argument('--num_inference_steps', type=int, default=20, help='Number of inference steps for generation')
     parser.add_argument("--prepared_dataset_path", type=str, default=None, help="Path to prepared dataset (if available)")

@@ -12,7 +12,7 @@ from cpsd.train_cpsd import train_cpsd
 from cpsd.train_cpsd_plus import train_cpsd_plus
 from cpsd.train_cpsd_cont import train_cpsd_cont
 from backbone.backbone import Backbone, DINOBackbone, LUCIRBackbone, AnnealingBackbone
-from backbone.train import Trainer, DINOTrainer, AnnealTrainer
+from backbone.train import Trainer, DINOTrainer, AnnealTrainer, AnnealTrainerPlus
 
 os.environ['wandb_api_key'] = '67265bb3f10a02ce2167c5006180fd57e2598daa'
 args = parse_args()
@@ -68,8 +68,12 @@ if args.trainer == 'dino':
     trainer = DINOTrainer(args, backbone, device)
 
 elif args.trainer == 'anneal':
-    backbone = AnnealingBackbone(args.num_classes, args.anti_discrim).to(device)
+    backbone = AnnealingBackbone(args.num_classes, args.anti_discrim, args.init_option).to(device)
     trainer = AnnealTrainer(args, backbone, device)
+
+elif args.trainer == 'anneal+':
+    backbone = AnnealingBackbone(args.num_classes, args.anti_discrim, args.init_option, True).to(device)
+    trainer = AnnealTrainerPlus(args, backbone, device)
 
 else:
     if args.trainer == 'lucir':
@@ -156,6 +160,18 @@ for task_id in range(args.total_task):
         
         train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
 
+    elif args.trainer == 'anneal+':
+        batch_size = args.c_batch_size // 2
+        if args.shared_gen_replay and not args.prepared_gen_dataset_path:
+            replay_ids = current_task_class_ids
+
+        else:
+            replay_ids = prev_current_ids + current_task_class_ids
+
+        gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size)
+ 
+        train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
+
     elif task_id > 0:
         batch_size = args.c_batch_size // 2
 
@@ -182,7 +198,11 @@ for task_id in range(args.total_task):
 
     trainer.train(task_id, task_ids, train_loader, val_loader, test_loader_list, gen_train_loader, gen_val_loader)
 
+    trainer.end_task()
+
     prev_current_ids.extend(current_task_class_ids)
+
+    torch.cuda.empty_cache()
     
 
 logger.add_bwt(results, results_mask_classes)
@@ -193,3 +213,4 @@ logger.write(vars(args), args.output_dir)
 
 d = logger.dump()
 wandb.log(d)
+print(d)

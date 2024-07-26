@@ -1,7 +1,6 @@
 python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/miniSD-diffusers \
                 --dataset_path=/home/ilee0022/cl-gen/datasets/imagenet100/huggingface \
                 --prepared_dataset_path=/home/ilee0022/cl-gen/CPSD/output/20240715-035354_cp_cpsd_c_224_lucir_f_new/CI_dataset \
-                --prepared_gen_dataset_path=/home/ilee0022/cl-gen/CPSD/output/20240721-232127_cp_cpsd_224_anneal_mix_init/gen_samples \
                 --cpsd_resolution=256 \
                 --cpsd_batch_size=4 \
                 --cpsd_gradient_accumulation_steps=1 \
@@ -22,18 +21,7 @@ python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/min
                 --cpsd_scale_lr \
                 --num_inference_steps=20 \
                 --use_blip \
-                --c_epochs=40 \
-                --c_lr=0.1 \
-                --c_resolution=224 \
-                --c_batch_size=128 \
-                --c_wd=0.0001 \
                 --method=cpsd \
-                --run_name=cp_cpsd_224_anneal_c3_mean_d_init_ad_1s_ema \
-                --trainer=anneal \
                 --shared_gen_replay \
                 --max_gen_batch_size=4 \
                 --v2_desc \
-                --c_anneal_epochs=1 \
-                --anti_discrim \
-                --init_option=mean_d \
-                --c_ema \
