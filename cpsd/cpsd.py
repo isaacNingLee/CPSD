@@ -24,16 +24,16 @@ class CPSDPipeline(StableDiffusionPipeline):
 
         return prompt_embeds, negative_prompt_embeds
 
-    def boomerang_aug(self, img, *args, **kwargs):
+    def boomerang_aug(self, img, prompt, percent_noise, num_inference_steps=20):
 
         self.embed_trans = None
 
-        latents = self.encode_latents(img)
-        # rnd percent noise between 0.02 and 0.5
-        rnd_percent_noise = torch.rand(1).item() * 0.18 + 0.02
-        z = self.boomerang_forward(rnd_percent_noise, latents)
+        latents = self.encode_latents(img.to(torch.float16))
+        # rnd percent noise between 0.02 and 0.999
+        #rnd_percent_noise = torch.rand(1).item() * 0.979 + 0.02
+        z = self.boomerang_forward(percent_noise, latents)
 
-        aug_img = self.boomerang_reverse(latents=z, percent_noise=rnd_percent_noise, *args, **kwargs)    
+        aug_img = self.boomerang_reverse(prompt, percent_noise, z, num_inference_steps)
 
         return aug_img
 
@@ -77,11 +77,27 @@ class CPSDPipeline(StableDiffusionPipeline):
         # Run the reverse boomerang process
         with autocast('cuda'):
             return self(prompt=prompt, percent_noise=percent_noise, latents=latents,
-                        num_inference_steps=num_inference_steps, output_type='pt').images.float()
+                        num_inference_steps=num_inference_steps, output_type='pil').images
 
 
+class CPSD2Pipeline(StableDiffusionPipeline):
 
+    def encode_prompt(self, *args, **kwargs):
+
+        prompt_embeds, negative_prompt_embeds = super().encode_prompt(*args, **kwargs)
+
+        if self.embed_trans is not None:
+            prompt_embeds = self.embed_trans(prompt_embeds.reshape(-1, 768)).reshape(prompt_embeds.shape)
+
+        return prompt_embeds, negative_prompt_embeds
     
+    def load_embed_trans(self, embed_trans_path: str):
+        embed_trans = torch.load(embed_trans_path).to(torch.float16)
+        self.embed_trans = embed_trans.to(self.device)
+
+    def unload_embed_trans(self):
+
+        self.embed_trans = None
 
 
 class CPSDPlusPipeline(CPSDPipeline):

@@ -117,7 +117,7 @@ class CosineContrastiveLoss(torch.nn.Module):
 
         return contrastive_loss
 
-def train_cpsd(args, train_data_dir, class_id):
+def train_cpsd_2(args, train_data_dir, class_id):
 
     logging_dir = os.path.join(args.output_dir, 'cpsd_logs')
 
@@ -206,9 +206,9 @@ def train_cpsd(args, train_data_dir, class_id):
 
     optimizer_cls = torch.optim.AdamW
 
-    embed_trans = torch.nn.Linear(77,77, bias = True)
+    embed_trans = torch.nn.Linear(768,768, bias = True)
     with torch.no_grad():  
-        embed_trans.weight.copy_(torch.eye(77))  # Set weights to identity matrix
+        embed_trans.weight.copy_(torch.eye(768))  # Set weights to identity matrix
         embed_trans.bias.zero_()  # Set bias to zero
 
 
@@ -256,7 +256,7 @@ def train_cpsd(args, train_data_dir, class_id):
     train_transforms = transforms.Compose(
         [
             transforms.Resize(args.cpsd_resolution, antialias=True),
-            transforms.RandomResizedCrop(args.cpsd_resolution, scale=(0.6, 1.0), interpolation=PIL_INTERPOLATION["lanczos"]),
+            transforms.RandomResizedCrop(args.c_resolution, scale=(0.6, 1.0), interpolation=PIL_INTERPOLATION["lanczos"]),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
@@ -377,7 +377,7 @@ def train_cpsd(args, train_data_dir, class_id):
 
                 # Get the text embedding for conditioning
                 encoder_hidden_states = text_encoder(batch["input_ids"], return_dict=False)[0]
-                encoder_hidden_states = embed_trans(encoder_hidden_states.reshape(-1, 77)).reshape(encoder_hidden_states.shape) 
+                encoder_hidden_states = embed_trans(encoder_hidden_states.reshape(-1, 768)).reshape(encoder_hidden_states.shape) 
 
 
 
@@ -449,9 +449,6 @@ def train_cpsd(args, train_data_dir, class_id):
 
             logs = {"step_loss": loss.detach().item(), "dist_loss": dist_loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
-
-            if args.cpsd_max_steps is not None and step >= args.cpsd_max_steps:
-                break
 
 
     # Create the pipeline using the trained modules and save it.

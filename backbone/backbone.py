@@ -10,7 +10,7 @@ from copy import deepcopy
 
 class Backbone(nn.Module):
 
-    def __init__(self, num_classes):
+    def __init__(self, args, num_classes):
         super(Backbone, self).__init__()
 
         self.num_classes = num_classes
@@ -19,6 +19,10 @@ class Backbone(nn.Module):
         
         self.fc = nn.Linear(in_features=self.net.fc.in_features, out_features=num_classes, bias=True)
         self.net.fc = nn.Identity()
+
+        if args.c_resolution < 100:
+            self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+            self.net.maxpool = nn.Identity()
 
         self.class_range = 0
 
@@ -58,8 +62,8 @@ class Backbone(nn.Module):
 
 class LUCIRBackbone(Backbone):
 
-    def __init__(self, num_classes, zap_p=None):
-        super(LUCIRBackbone, self).__init__(num_classes)
+    def __init__(self, args, num_classes, zap_p=None):
+        super(LUCIRBackbone, self).__init__(args, num_classes)
 
         self.weights = nn.ParameterList(
             []
@@ -235,84 +239,6 @@ class LUCIRBackbone(Backbone):
 
 
 
-class DINOBackbone(Backbone):
-    
-    def __init__(self, num_classes, pipeline:CPSDPipeline, c_resolution):
-        super(DINOBackbone, self).__init__(num_classes)
-
-        self.pipeline = pipeline
-        self.crop1 = K.RandomResizedCrop(size=(c_resolution, c_resolution), scale=(0.4, 1.0), keepdim=True, resample=kornia.constants.Resample.BICUBIC)
-        self.crop2 = K.RandomResizedCrop(size=(c_resolution, c_resolution), scale=(0.75, 1.0), keepdim=True, resample=kornia.constants.Resample.BICUBIC)
-        self.normalize = K.Normalize(mean=0.5, std=0.5)
-        self.jitter = K.ColorJitter(0.05, 0.05, 0.05, 0.02)
-        self.blur = K.RandomBoxBlur(kernel_size=(3, 3), p=0.5)
-        self.mse_loss = nn.MSELoss()
-
-    def augment(self, x, prompts):
-        
-        with torch.no_grad():
-            # random crop
-            x1 = self.crop1(x)
-            x2 = self.crop1(x)
-
-            # boomerang aug
-            x1 = self.jitter(self.blur(x1))
-            x2 = self.jitter(self.blur(x2))
-
-            # crop again
-            x1 = self.crop2(x1)
-            x2 = self.crop2(x2)
-
-            # normalize
-            x1 = self.normalize(x1).detach()
-            x2 = self.normalize(x2).detach()
-
-        return x1, x2
-
-    def forward(self, x, return_z=False):
-        z = self.net(x)
-        y = self.fc(z)[:, :self.class_range]
-
-        if return_z:
-
-            return y, z
-        else:
-            return y
-
-    def observe(self, x, y, prompt=None, gen_x=None, gen_y=None, gen_prompt=None):
-
-        if self.training:
-
-            x1, x2 = self.augment(x, prompt)
-
-            if gen_x is None:
-
-                y_hat_1, z_hat_1 = self(x1, return_z=True)
-                y_hat_2, z_hat_2 = self(x2, return_z=True)
-
-                y_hat_cat = torch.cat([y_hat_1, y_hat_2], dim=0)
-                y_cat = torch.cat([y, y], dim=0)
-
-                
-
-            else:
-                gen_x1, gen_x2 = self.augment(gen_x, gen_prompt)
-
-                x_cat_1 = torch.cat([x1, gen_x1], dim=0)
-                x_cat_2 = torch.cat([x2, gen_x2], dim=0)
-
-                y_cat = torch.cat([y,y, gen_y, gen_y], dim=0)
-
-                y_hat_1, z_hat_1 = self(x_cat_1, return_z=True)
-                y_hat_2, z_hat_2 = self(x_cat_2, return_z=True)
-
-                y_hat_cat = torch.cat([y_hat_1, y_hat_2], dim=0)
-
-            loss = self.criterion(y_hat_cat, y_cat) + 1e-2 * self.mse_loss(z_hat_1, z_hat_2)
-            acc = (y_hat_cat.argmax(dim=1) == y_cat).float().mean()
-            return loss, acc
-        else:
-            return super().observe(x, y, gen_x, gen_y)
 
 class DINOAugment(nn.Module):
 
@@ -336,8 +262,8 @@ class DINOAugment(nn.Module):
     
 class AnnealingBackbone(Backbone):
 
-    def __init__(self, num_classes, anti_discrim=False, init_option='old', plus=False):
-        super(AnnealingBackbone, self).__init__(num_classes)
+    def __init__(self, args, num_classes, anti_discrim=False, init_option='old', plus=False):
+        super(AnnealingBackbone, self).__init__(args, num_classes)
 
         self.old_teacher = None
         self.new_teacher = None
@@ -398,7 +324,9 @@ class AnnealingBackbone(Backbone):
         
         elif self.init_option == 'mean_d':
 
-            self.mem_alpha = 1 - 1 / (self.task_id + 1)
+            # mem alpha is a cosine function starts at 0.5 ends 0.75
+            self.mem_alpha = 0.5 + 0.25 * math.sin(math.pi * (self.task_id - 1) / 10)
+            # self.mem_alpha = 1 - 1 / (self.task_id + 1)
             with torch.no_grad():
                 for param, old_param, new_param in zip(self.net.parameters(), self.old_teacher.net.parameters(), self.new_teacher.net.parameters()):
                     param.data = old_param.data * self.mem_alpha + new_param * (1 - self.mem_alpha)
@@ -408,7 +336,7 @@ class AnnealingBackbone(Backbone):
                     
         elif self.init_option == 'norm_mean':
 
-            self.mem_alpha = 1 - 1 / (self.task_id + 1)
+            self.mem_beta = 1 - 1 / (self.task_id + 1)
             with torch.no_grad():
                 for param, old_param, new_param in zip(self.net.parameters(), self.old_teacher.net.parameters(), self.new_teacher.net.parameters()):
                     param.data = F.normalize(old_param.data, p=2, dim=1) * self.mem_alpha + F.normalize((new_param.data), p=2, dim=1) * (1 - self.mem_alpha)
@@ -485,6 +413,24 @@ class AnnealingBackbone(Backbone):
         loss = torch.nn.functional.binary_cross_entropy_with_logits(cosine_sim, positive_pairs)
 
         return loss
+    
+    def replace_RELU_with_SILU(self):
+        # for sparsity to work
+            
+        for name, module in self.net.named_children():
+            if isinstance(module, nn.ReLU):
+                setattr(self.net, name, nn.SiLU())
+
+
+    def l1_loss(self):
+        loss = 0
+        for param in self.net.parameters():
+            loss += torch.norm(param, 1)
+
+        for param in self.fc.parameters():
+            loss += torch.norm(param, 1)
+
+        return loss
 
 
 
@@ -522,20 +468,20 @@ class AnnealingBackbone(Backbone):
                 _ , z_new = self.new_teacher(x_cat, return_z=True)
 
                 ###
-                x_cat_aug = self.dino_augment(x_cat)
-                _ , z_aug = self(x_cat_aug, return_z=True)
+                #x_cat_aug = self.dino_augment(x_cat)
+                #_ , z_aug = self(x_cat_aug, return_z=True)
                 ##
                 
             
             y_hat, z_student = self(x_cat, return_z=True)
             mse_loss = self.mem_alpha * self.mse_loss(z_student, z_old) + (1 - self.mem_alpha) * self.mse_loss(z_student, z_new)
             ##
-            class_con_loss = self.class_con_loss(torch.cat([z_student, z_aug], dim=0), torch.cat([y_cat, y_cat], dim=0))
+            #class_con_loss = self.class_con_loss(torch.cat([z_student, z_aug], dim=0), torch.cat([y_cat, y_cat], dim=0))
             ##
 
             if self.anti_discrim:
                 gen_start_idx = len(x)
-                ce_loss = self.criterion(y_hat[gen_start_idx:], y_cat[gen_start_idx:]) + 0.2 * (1 - self.mem_alpha) * self.criterion(y_hat[:gen_start_idx], y_cat[:gen_start_idx])
+                ce_loss = self.criterion(y_hat[gen_start_idx:], y_cat[gen_start_idx:]) + 0.1 * (1 - self.mem_alpha) * self.criterion(y_hat[:gen_start_idx], y_cat[:gen_start_idx])
                 #logits_mse_loss = (1 - self.mem_alpha) * self.mse_loss(y_hat[:len(y)], y_new[:len(y)]) 
             else:
                 ce_loss = self.criterion(y_hat, y_cat)
@@ -552,8 +498,8 @@ class AnnealingBackbone(Backbone):
                 loss = self.criterion(y_hat[:len(y)], y_cat[:len(y)]) + class_con_loss
 
             elif self.plus:
-                class_con_loss = self.class_con_loss(z_hat, y_cat)
-                loss = self.criterion(y_hat[:len(y)], y_cat[:len(y)]) + 0.1 * class_con_loss
+                #class_con_loss = self.class_con_loss(z_hat, y_cat)
+                loss = self.criterion(y_hat, y_cat)
             else:
                 loss = self.criterion(y_hat, y_cat)
 
@@ -569,4 +515,82 @@ class AnnealingBackbone(Backbone):
         
 
 
-            
+# class DINOBackbone(Backbone):
+    
+#     def __init__(self, num_classes, pipeline:CPSDPipeline, c_resolution):
+#         super(DINOBackbone, self).__init__(num_classes)
+
+#         self.pipeline = pipeline
+#         self.crop1 = K.RandomResizedCrop(size=(c_resolution, c_resolution), scale=(0.4, 1.0), keepdim=True, resample=kornia.constants.Resample.BICUBIC)
+#         self.crop2 = K.RandomResizedCrop(size=(c_resolution, c_resolution), scale=(0.75, 1.0), keepdim=True, resample=kornia.constants.Resample.BICUBIC)
+#         self.normalize = K.Normalize(mean=0.5, std=0.5)
+#         self.jitter = K.ColorJitter(0.05, 0.05, 0.05, 0.02)
+#         self.blur = K.RandomBoxBlur(kernel_size=(3, 3), p=0.5)
+#         self.mse_loss = nn.MSELoss()
+
+#     def augment(self, x, prompts):
+        
+#         with torch.no_grad():
+#             # random crop
+#             x1 = self.crop1(x)
+#             x2 = self.crop1(x)
+
+#             # boomerang aug
+#             x1 = self.jitter(self.blur(x1))
+#             x2 = self.jitter(self.blur(x2))
+
+#             # crop again
+#             x1 = self.crop2(x1)
+#             x2 = self.crop2(x2)
+
+#             # normalize
+#             x1 = self.normalize(x1).detach()
+#             x2 = self.normalize(x2).detach()
+
+#         return x1, x2
+
+#     def forward(self, x, return_z=False):
+#         z = self.net(x)
+#         y = self.fc(z)[:, :self.class_range]
+
+#         if return_z:
+
+#             return y, z
+#         else:
+#             return y
+
+#     def observe(self, x, y, prompt=None, gen_x=None, gen_y=None, gen_prompt=None):
+
+#         if self.training:
+
+#             x1, x2 = self.augment(x, prompt)
+
+#             if gen_x is None:
+
+#                 y_hat_1, z_hat_1 = self(x1, return_z=True)
+#                 y_hat_2, z_hat_2 = self(x2, return_z=True)
+
+#                 y_hat_cat = torch.cat([y_hat_1, y_hat_2], dim=0)
+#                 y_cat = torch.cat([y, y], dim=0)
+
+                
+
+#             else:
+#                 gen_x1, gen_x2 = self.augment(gen_x, gen_prompt)
+
+#                 x_cat_1 = torch.cat([x1, gen_x1], dim=0)
+#                 x_cat_2 = torch.cat([x2, gen_x2], dim=0)
+
+#                 y_cat = torch.cat([y,y, gen_y, gen_y], dim=0)
+
+#                 y_hat_1, z_hat_1 = self(x_cat_1, return_z=True)
+#                 y_hat_2, z_hat_2 = self(x_cat_2, return_z=True)
+
+#                 y_hat_cat = torch.cat([y_hat_1, y_hat_2], dim=0)
+
+#             loss = self.criterion(y_hat_cat, y_cat) + 1e-2 * self.mse_loss(z_hat_1, z_hat_2)
+#             acc = (y_hat_cat.argmax(dim=1) == y_cat).float().mean()
+#             return loss, acc
+#         else:
+#             return super().observe(x, y, gen_x, gen_y)
+

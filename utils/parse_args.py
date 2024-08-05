@@ -26,12 +26,13 @@ def parse_args():
     parser.add_argument('--c_zap_p', type=float, default=None, help='Probability of zapping weights')
     parser.add_argument('--c_dino', action='store_true', help='Use DINO for generation')
     parser.add_argument('--clip_grad_norm', type=float, default=None, help='Clip gradient norm')
-    parser.add_argument('--trainer', type=str, default='normal', choices=['normal', 'dino', 'lucir', 'anneal', 'anneal+'], help='Trainer to use')
+    parser.add_argument('--trainer', type=str, default='normal', choices=['normal', 'dino', 'lucir', 'anneal', 'anneal+','aug'], help='Trainer to use')
     parser.add_argument('--joint_init', action='store_true', help='Initialize joint model')
     parser.add_argument('--syn_only', action='store_true', help='Only use synthetic data for training')
     parser.add_argument('--anti_discrim', action='store_true', help='Use anti-discriminator')
     parser.add_argument('--c_anneal_epochs', type=int, default=5, help='Number of annealing epochs')
     parser.add_argument('--init_option', type=str, default='random', choices=['random','old', 'new', 'mean', 'mean_d', 'norm_mean', 'norm_mean_static','c_dino'], help='Initialization option')
+    parser.add_argument('--use_c_l1', action='store_true', help='Use L1 loss for training')
 
 
     parser.add_argument('--n_replay', type=int, default=100, help='Number of replay samples per class')
@@ -48,7 +49,7 @@ def parse_args():
     parser.add_argument('--run_name', type=str, default='debug')
     parser.add_argument('--pretrained_model_name_or_path', type=str, default='/home/ilee0022/cl-gen/models/miniSD-diffusers')
     parser.add_argument('--model_name', type=str, default='miniSD-diffusers')
-    parser.add_argument('--method', type=str, default='cpsd', choices=['cpsd', 'cpsd+', 'cpsd_cont', 'replay'], help='Method to use for training')
+    parser.add_argument('--method', type=str, default='cpsd', choices=['cpsd', 'cpsd+', 'cpsd_cont', 'replay', 'cpsd2', 'sd'], help='Method to use for training')
 
     ## CPSD args ##
     # data
@@ -77,6 +78,8 @@ def parse_args():
     parser.add_argument('--cpsd_scale_lr', action='store_true', help='Scale learning rate by number of GPUs, gradient accumulation steps, and batch size')
     parser.add_argument('--cpsd_ema', action='store_true', help='Use EMA for training')
     parser.add_argument('--cpsd_contrastive_loss', type=float, default=None, help='Contrastive loss weight')
+    parser.add_argument('--cpsd_scheduler', type=str, default='pndm', help='Scheduler to use')
+    parser.add_argument('--cpsd_max_steps', type=int, default=None, help='Maximum number of steps')
 
     ## Backbone ##
     parser.add_argument('--dataloader_num_workers', type=int, default=4, help='Number of workers for dataloader')
