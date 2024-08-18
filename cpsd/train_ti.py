@@ -64,60 +64,8 @@ else:
 
 logger = get_logger(__name__)
 
-# class ContrastiveLoss(torch.nn.Module):
-#     def __init__(self, margin=1.0):
-#         super(ContrastiveLoss, self).__init__()
-#         self.margin = margin
 
-#     def forward(self, hidden_states):
-#         # check if hidden states is in (bs, -1)
-#         if hidden_states.dim() != 2:
-#             hidden_states = hidden_states.view(hidden_states.size(0), -1)
-
-#         batch_size = hidden_states.size(0)
-#         pairwise_distances = torch.cdist(hidden_states, hidden_states, p=2)  # Compute pairwise distances
-
-#         # Create a mask to ignore the diagonal (distance with itself)
-#         mask = torch.eye(batch_size, device=hidden_states.device).bool()
-#         pairwise_distances = pairwise_distances[~mask].view(batch_size, -1)
-
-#         # Compute the contrastive loss
-#         contrastive_loss = F.relu(self.margin - pairwise_distances).mean()
-
-#         return contrastive_loss
-
-# class CosineContrastiveLoss(torch.nn.Module):
-
-#     def __init__(self, margin=0.5):
-#         super(CosineContrastiveLoss, self).__init__()
-#         self.margin = margin
-
-#     def forward(self, hidden_states):
-#         # Check if hidden states is in (bs, -1)
-#         if hidden_states.dim() != 2:
-#             hidden_states = hidden_states.view(hidden_states.size(0), -1)
-
-#         batch_size = hidden_states.size(0)
-
-#         # Normalize hidden states
-#         hidden_states = F.normalize(hidden_states, p=2, dim=1)
-
-#         # Compute pairwise cosine similarity
-#         cosine_similarity = torch.mm(hidden_states, hidden_states.t())
-
-#         # Convert to cosine distance
-#         cosine_distance = 1 - cosine_similarity
-
-#         # Create a mask to ignore the diagonal (distance with itself)
-#         mask = torch.eye(batch_size, device=hidden_states.device).bool()
-#         cosine_distance = cosine_distance[~mask].view(batch_size, -1)
-
-#         # Compute the contrastive loss
-#         contrastive_loss = F.relu(self.margin - cosine_distance).mean()
-
-#         return contrastive_loss
-
-def train_cpsd(args, train_data_dir, class_id):
+def train_ti(args, train_data_dir, class_id, class_name):
 
     logging_dir = os.path.join(args.output_dir, 'cpsd_logs')
 
@@ -195,7 +143,7 @@ def train_cpsd(args, train_data_dir, class_id):
 
     # Freeze vae and text_encoder and unet
     vae.requires_grad_(False)
-    text_encoder.requires_grad_(False)
+
     unet.requires_grad_(False)
 
 
@@ -206,15 +154,54 @@ def train_cpsd(args, train_data_dir, class_id):
 
     optimizer_cls = torch.optim.AdamW
 
-    embed_trans = torch.nn.Linear(77,77, bias = True)
-    with torch.no_grad():  
-        embed_trans.weight.copy_(torch.eye(77))  # Set weights to identity matrix
-        embed_trans.bias.zero_()  # Set bias to zero
+    # Add the placeholder token in tokenizer
+    placeholder_tokens = [f'<{class_id}>']
+
+    num_added_tokens = tokenizer.add_tokens(placeholder_tokens)
+    if num_added_tokens != 1:
+        raise ValueError(
+            f"The tokenizer already contains the token {args.placeholder_token}. Please pass a different"
+            " `placeholder_token` that is not already in the tokenizer."
+        )
 
 
-    embed_trans.to(accelerator.device)
+    # Freeze all parameters except for the token embeddings in text encoder
+    text_encoder.text_model.encoder.requires_grad_(False)
+    text_encoder.text_model.final_layer_norm.requires_grad_(False)
+    text_encoder.text_model.embeddings.position_embedding.requires_grad_(False)
+
+    # Convert the initializer_token, placeholder_token to ids
+    token_ids = tokenizer.encode(class_name, add_special_tokens=False) #################
+
+    ### most meaningful token preprocessing ###
+    token_tensor = torch.tensor(token_ids)
+    full_embed = text_encoder(token_tensor.reshape(1, -1))[0]
+
+    # compute cosine similarity between entire full_embed and each of its component
+    with torch.no_grad():
+        cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+        cos_sim = cos(full_embed, full_embed.reshape(len(token_ids), 1, 768)).mean(dim=1)
+        best_idx = cos_sim.argmax().item()
+
+
+    #######
+
+    initializer_token_id = token_ids[best_idx] # take first one, TODO: how to deal with multi ????(like komodo dragon, komodo or dragon???), most meaningful token preprocessing
+    placeholder_token_ids = tokenizer.convert_tokens_to_ids(placeholder_tokens)
+
+    # Resize the token embeddings as we are adding new special tokens to the tokenizer
+    text_encoder.resize_token_embeddings(len(tokenizer))
+
+    # Initialise the newly added placeholder token with the embeddings of the initializer token
+    token_embeds = text_encoder.get_input_embeddings().weight.data
+    with torch.no_grad():
+        for token_id in placeholder_token_ids:
+            token_embeds[token_id] = token_embeds[initializer_token_id].clone() ###[CLS] token
+
+
+
     optimizer = optimizer_cls(
-        embed_trans.parameters(),
+        text_encoder.get_input_embeddings().parameters(),  # only optimize the embeddings
         lr=learning_rate,
         betas=(args.cpsd_adam_beta1, args.cpsd_adam_beta2),
         weight_decay=args.cpsd_adam_weight_decay,
@@ -240,12 +227,12 @@ def train_cpsd(args, train_data_dir, class_id):
         captions = []
 
         if args.use_blip:
-            for caption, desc in zip(examples[caption_column], examples[desc_column]):
-                captions.append(f"{caption}, {desc}")
+            for _, desc in zip(examples[caption_column], examples[desc_column]):
+                captions.append(f"{placeholder_tokens[0]}, {desc}")
         else:
-            for caption in examples[caption_column]:
+            for _ in examples[caption_column]:
 
-                captions.append(caption)
+                captions.append(placeholder_tokens[0])
 
         inputs = tokenizer(
             captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
@@ -301,8 +288,8 @@ def train_cpsd(args, train_data_dir, class_id):
     )
 
     # Prepare everything with our `accelerator`.
-    unet, optimizer, train_dataloader, lr_scheduler, embed_trans = accelerator.prepare(
-        unet, optimizer, train_dataloader, lr_scheduler, embed_trans
+    text_encoder, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        text_encoder, optimizer, train_dataloader, lr_scheduler
     )
 
 
@@ -311,15 +298,14 @@ def train_cpsd(args, train_data_dir, class_id):
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
         weight_dtype = torch.float16
-        args.mixed_precision = accelerator.mixed_precision
-        # if args.classifier_guidance:
-        #     classifier.net = classifier.net.half()
+        
+
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
-        args.mixed_precision = accelerator.mixed_precision
+       
 
     # Move text_encode and vae to gpu and cast to weight_dtype
-    text_encoder.to(accelerator.device, dtype=weight_dtype)
+    unet.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
 
 
@@ -355,9 +341,13 @@ def train_cpsd(args, train_data_dir, class_id):
         # Only show the progress bar once on each machine.
         disable=not accelerator.is_local_main_process,
     )
-    contrastive_loss_fn = CosineContrastiveLoss(margin=0.2)
+
+    # keep original embeddings as reference
+    orig_embeds_params = accelerator.unwrap_model(text_encoder).get_input_embeddings().weight.data.clone()
+    text_encoder.train()
     for epoch in range(first_epoch, args.cpsd_num_train_epochs):
         train_loss = 0.0
+        
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(unet):
                 # Convert images to latent space
@@ -376,9 +366,7 @@ def train_cpsd(args, train_data_dir, class_id):
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
                 # Get the text embedding for conditioning
-                encoder_hidden_states = text_encoder(batch["input_ids"], return_dict=False)[0]
-                encoder_hidden_states = embed_trans(encoder_hidden_states.reshape(-1, 77)).reshape(encoder_hidden_states.shape) 
-
+                encoder_hidden_states = text_encoder(batch["input_ids"], return_dict=False)[0].to(dtype=weight_dtype)
 
 
                 if noise_scheduler.config.prediction_type == "epsilon":
@@ -422,10 +410,6 @@ def train_cpsd(args, train_data_dir, class_id):
                     dist_loss = F.mse_loss(model_pred_ws, target_ws, reduction="mean") 
                     loss = loss + dist_loss * args.cpsd_dist_match
 
-                contrastive_loss = 0
-                if args.cpsd_contrastive_loss:
-                    contrastive_loss = contrastive_loss_fn(encoder_hidden_states)
-                    loss += contrastive_loss * args.cpsd_contrastive_loss
 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(args.cpsd_batch_size)).mean()
@@ -433,11 +417,21 @@ def train_cpsd(args, train_data_dir, class_id):
 
                 # Backpropagate
                 accelerator.backward(loss)
+
                 if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(unet.parameters(), args.cpsd_max_grad_norm)
+                    accelerator.clip_grad_norm_(text_encoder.get_input_embeddings().parameters(), args.cpsd_max_grad_norm)
+
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
+                # Let's make sure we don't update any embedding weights besides the newly added token
+                index_no_updates = torch.ones((len(tokenizer),), dtype=torch.bool)
+                index_no_updates[min(placeholder_token_ids) : max(placeholder_token_ids) + 1] = False
+
+                with torch.no_grad():
+                    accelerator.unwrap_model(text_encoder).get_input_embeddings().weight[
+                        index_no_updates
+                    ] = orig_embeds_params[index_no_updates]
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -457,9 +451,33 @@ def train_cpsd(args, train_data_dir, class_id):
     # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        if args.output_dir + f'/cp_embeddings' is not None:
-            os.makedirs(args.output_dir + f'/cp_embeddings', exist_ok=True)
+        if args.output_dir + f'/ti_embeddings' is not None:
+            os.makedirs(args.output_dir + f'/ti_embeddings', exist_ok=True)
 
-        torch.save(embed_trans, args.output_dir + f'/cp_embeddings/class_{class_id}.pt')
+        weight_name = f"class_{class_id}.safetensors"
+        save_path = os.path.join(args.output_dir + f'/ti_embeddings', weight_name)
+        save_progress(
+            text_encoder,
+            placeholder_tokens,
+            placeholder_token_ids,
+            accelerator,
+            save_path,
+            safe_serialization=True,
+        )
+
 
     accelerator.end_training()
+
+def save_progress(text_encoder, placeholder_tokens, placeholder_token_ids, accelerator, save_path, safe_serialization=True):
+    logger.info("Saving embeddings")
+    learned_embeds = (
+        accelerator.unwrap_model(text_encoder)
+        .get_input_embeddings()
+        .weight[min(placeholder_token_ids) : max(placeholder_token_ids) + 1]
+    )
+    learned_embeds_dict = {placeholder_tokens[0]: learned_embeds.detach().cpu()}
+
+    if safe_serialization:
+        safetensors.torch.save_file(learned_embeds_dict, save_path, metadata={"format": "pt"})
+    else:
+        torch.save(learned_embeds_dict, save_path)

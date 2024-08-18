@@ -5,16 +5,14 @@ import wandb
 import torch
 import numpy as np
 from manager.manager import Manager
-from diffusers import StableDiffusionPipeline
-from cpsd.cpsd import CPSDPipeline, CPSDPlusPipeline, CPSDContPipeline, CPSD2Pipeline
+from cpsd.cpsd import CPSDPipeline, StableDiffusionPipeline
+from cpsd.ti import TIPipeline
 from diffusers import DPMSolverMultistepScheduler
 from utils.logger import Logger
 from cpsd.train_cpsd import train_cpsd
-from cpsd.train_cpsd_plus import train_cpsd_plus
-from cpsd.train_cpsd_cont import train_cpsd_cont
-from cpsd.train_cpsd_2 import train_cpsd_2
+from cpsd.train_ti import train_ti
 from backbone.backbone import Backbone, LUCIRBackbone, AnnealingBackbone
-from backbone.train import Trainer, AnnealTrainer, AnnealTrainerPlus, AugTrainer, AugAnnealTrainer
+from backbone.train import Trainer, AnnealTrainer, AnnealTrainerPlus,  AugAnnealTrainer
 from torchvision import transforms
 from PIL import Image
 
@@ -50,15 +48,8 @@ else:
 if args.method == 'cpsd':
     pipeline = CPSDPipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
 
-elif args.method == 'cpsd+':
-    pipeline = CPSDPlusPipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
-
-elif args.method == 'cpsd_cont':
-    pipeline = CPSDContPipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
-
-elif args.method == 'cpsd2':
-    print("Using CPSD2")
-    pipeline = CPSD2Pipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
+elif args.method == 'ti':
+    pipeline = TIPipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
 
 else:
     pipeline = StableDiffusionPipeline.from_pretrained(args.pretrained_model_name_or_path, torch_dtype=torch.float16).to(device)
@@ -67,16 +58,13 @@ else:
 if pipeline is not None:
     if args.cpsd_scheduler == 'DPMSolver':
         pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
-    #pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
+
     pipeline.set_progress_bar_config(disable=True)
 
 
-# if args.trainer == 'dino':
-#     backbone = DINOBackbone(args.num_classes, pipeline, args.c_resolution).to(device)
-#     trainer = DINOTrainer(args, backbone, device)
 
 if args.trainer == 'anneal' or args.trainer == 'aug':
-    backbone = AnnealingBackbone(args, args.num_classes, args.anti_discrim, args.init_option).to(device)
+    backbone = AnnealingBackbone(args, args.num_classes, args.anti_discrim, args.init_option, device = device).to(device)
 
     if args.trainer == 'aug':
         trainer = AugAnnealTrainer(args, backbone, device)
@@ -85,7 +73,7 @@ if args.trainer == 'anneal' or args.trainer == 'aug':
         trainer = AnnealTrainer(args, backbone, device)
 
 elif args.trainer == 'anneal+':
-    backbone = AnnealingBackbone(args, args.num_classes, args.anti_discrim, args.init_option, True).to(device)
+    backbone = AnnealingBackbone(args, args.num_classes, args.anti_discrim, args.init_option, True, device = device).to(device)
 
     
     trainer = AnnealTrainerPlus(args, backbone, device)
@@ -96,9 +84,6 @@ else:
 
     else:
         backbone = Backbone(args, args.num_classes).to(device)
-
-    # if args.trainer == 'aug':
-    #     trainer = AugTrainer(args, backbone, device)
 
 
     trainer = Trainer(args, backbone, device)
@@ -129,15 +114,8 @@ for task_id in range(args.total_task):
             if args.method == 'cpsd':
                 train_cpsd(args, cl_dataset_path+f'/class_{class_id}', class_id)
 
-            elif args.method == 'cpsd+':
-                train_cpsd_plus(args, cl_dataset_path+f'/class_{class_id}', class_id)
-                
-
-            elif args.method == 'cpsd_cont':
-                train_cpsd_cont(args, cl_dataset_path+f'/class_{class_id}', class_id)
-
-            elif args.method == 'cpsd2':
-                train_cpsd_2(args, cl_dataset_path+f'/class_{class_id}', class_id)
+            elif args.method == 'ti':
+                train_ti(args, cl_dataset_path+f'/class_{class_id}', class_id, dataset_manager.get_class_name(class_id))
                 
             elif args.method == 'replay':
                 print("No training needed")
@@ -176,14 +154,14 @@ for task_id in range(args.total_task):
             replay_ids = prev_current_ids + current_task_class_ids
 
         if task_id > 0:
-            gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size) #####
+            gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size // 2) #####
         else:
             gen_train_loader, gen_val_loader = None, None
 
         if args.trainer == 'aug':
             batch_size = args.c_batch_size // 2
 
-        train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
+        train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size if task_id == 0 else batch_size // 2)
         if args.trainer == 'aug':
             
             resize_transform = transforms.Resize((args.cpsd_resolution, args.cpsd_resolution), antialias=True, interpolation=Image.BILINEAR)
@@ -214,23 +192,57 @@ for task_id in range(args.total_task):
             aug_train_loader = dataset_manager.get_aug_dataloader(prev_current_ids + current_task_class_ids, pipeline, task_id, prep_loader, batch_size = batch_size) 
 
     elif args.trainer == 'anneal+':
-        batch_size = args.c_batch_size // 2
+        batch_size = args.c_batch_size
         if args.shared_gen_replay and not args.prepared_gen_dataset_path:
             replay_ids = current_task_class_ids
 
+            if task_id == 0:
+
+                _, _ = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size) # just to let it generate the replay samples
+                gen_train_loader, gen_val_loader = None, None
         else:
             replay_ids = prev_current_ids + current_task_class_ids
 
-        gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size)
- 
+        if task_id > 0:
+            gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size) #####
+        else:
+            gen_train_loader, gen_val_loader = None, None
+
+
+        batch_size = args.c_batch_size // 2
+
         train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
 
-    # elif args.trainer == 'aug':
-    #     batch_size = args.c_batch_size // 2 
-    #     aug_ids = prev_current_ids + current_task_class_ids
-    #     train_loader, val_loader, test_loader = dataset_manager.get_current_task_dataloader(current_task_class_ids, batch_size)
-    #     aug_train_loader = dataset_manager.get_aug_dataloader(aug_ids, pipeline, task_id, train_loader, batch_size = batch_size) 
-    #     gen_train_loader, gen_val_loader = None, None
+            
+        resize_transform = transforms.Resize((args.cpsd_resolution, args.cpsd_resolution), antialias=True, interpolation=Image.BILINEAR)
+        def custom_collate_fn(batch):
+            transformed_batch = []
+            for sample in batch:
+                pixel_values = sample['pixel_values']
+                cl_label = sample['cl_label']
+                
+                # Apply the resize transformation
+                transformed_pixel_values = resize_transform(pixel_values)
+                
+                
+                transformed_sample = {
+                    'pixel_values': transformed_pixel_values,
+                    'cl_label': cl_label
+                }
+                transformed_batch.append(transformed_sample)
+            batch = {key: torch.stack([d[key] for d in transformed_batch]) for key in transformed_batch[0]}
+            return batch
+                
+        dataset = train_loader.dataset
+        batch_size = train_loader.batch_size
+        num_workers = train_loader.num_workers
+        pin_memory = train_loader.pin_memory
+
+        prep_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory, collate_fn=custom_collate_fn)
+
+        aug_train_loader = dataset_manager.get_aug_dataloader(prev_current_ids + current_task_class_ids, pipeline, task_id, prep_loader, batch_size = batch_size) 
+
+
 
     elif task_id > 0:
         batch_size = args.c_batch_size // 2
@@ -256,7 +268,7 @@ for task_id in range(args.total_task):
 
     test_loader_list.append(test_loader)
 
-    if args.trainer == 'aug':
+    if args.trainer == 'aug' or args.trainer == 'anneal+':
         accs = trainer.train(task_id, task_ids, train_loader, val_loader, test_loader_list, gen_train_loader, gen_val_loader, aug_train_loader)
 
     else:

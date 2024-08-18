@@ -3,3 +3,4 @@ debug
 output
 logs
 wandb
+prepared_ci_dat

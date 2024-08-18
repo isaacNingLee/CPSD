@@ -8,7 +8,7 @@
 # NOTE: To activate a SLURM option, remove the whitespace between the '#' and 'SBATCH'
 
 # To give your job a name, replace "MyJob" with an appropriate name
-#SBATCH --job-name=ilee_cp_cpsd_cifar10_anneala_mean_init_ad2_1
+#SBATCH --job-name=ilee_cpsd_imagenet100_anneal_v2_10
 
 # Request CPU resource for a serial job
 # SBATCH --ntasks=1
@@ -26,10 +26,10 @@
 #SBATCH --mem-per-cpu=40000
 
 # Set the file for output (stdout)
-#SBATCH --output=logs/cp_cpsd_cifar10_anneala_mean_init_ad2_1.out
+#SBATCH --output=logs/cpsd_imagenet100_anneal_v2_10.out
 
 # Set the file for error log (stderr)
-#SBATCH --error=logs/cp_cpsd_cifar10_anneala_mean_init_ad2_1.err
+#SBATCH --error=logs/cpsd_imagenet100_anneal_v2_10.err
 
 
 # Command to run
@@ -38,4 +38,4 @@ nvidia-smi
 source /mnt/userdata3/cl-gen/miniforge3/bin/activate
 conda activate stable_diff
 cd /mnt/userdata3/cl-gen/CPSD
-bash scripts/run_cifar10.sh
+bash scripts/run_imagenet100.sh

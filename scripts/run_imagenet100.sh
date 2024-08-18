@@ -1,11 +1,13 @@
 python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/miniSD-diffusers \
                 --dataset_path=/home/ilee0022/cl-gen/datasets/imagenet100/huggingface \
-                --prepared_dataset_path=/home/ilee0022/cl-gen/CPSD/output/20240715-035354_cp_cpsd_c_224_lucir_f_new/CI_dataset \
+                --prepared_dataset_path=/home/ilee0022/cl-gen/CPSD/prepared_ci_dat/Imagenet100_prep \
+                --prepared_cpsd_path=/home/ilee0022/cl-gen/CPSD/output/20240812-040949_cpsd_imagenet100_gen_v2/cp_embeddings \
+                --prepared_gen_dataset_path=/home/ilee0022/cl-gen/CPSD/output/20240812-040949_cpsd_imagenet100_gen_v2/gen_samples \
                 --cpsd_resolution=256 \
                 --cpsd_batch_size=4 \
                 --cpsd_gradient_accumulation_steps=1 \
                 --mixed_precision=fp16 \
-                --cpsd_num_train_epochs=3 \
+                --cpsd_num_train_epochs=1 \
                 --cpsd_learning_rate=1e-04 \
                 --cpsd_max_grad_norm=1 \
                 --cpsd_lr_scheduler=constant \
@@ -20,20 +22,22 @@ python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/min
                 --n_replay=1300 \
                 --cpsd_scale_lr \
                 --num_inference_steps=20 \
-                --use_blip \
                 --c_epochs=40 \
                 --c_lr=0.1 \
                 --c_resolution=224 \
                 --c_batch_size=128 \
                 --c_wd=0.0001 \
                 --method=cpsd \
-                --run_name=cp_cpsd2_224_anneal_mean_init_ad2 \
+                --project_name=imagenet100 \
+                --run_name=cpsd_imagenet100_anneal_v2_10 \
                 --trainer=anneal \
                 --shared_gen_replay \
                 --max_gen_batch_size=4 \
-                --v2_desc \
                 --c_anneal_epochs=5 \
                 --anti_discrim \
                 --init_option=mean \
+                --cpsd_scheduler=DPMSolver \
+                --use_blip \
+                --v2_desc \
 
 # --prepared_gen_dataset_path=/home/ilee0022/cl-gen/CPSD/output/20240721-232127_cp_cpsd_224_anneal_mix_init/gen_samples \

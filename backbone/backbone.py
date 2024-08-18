@@ -7,10 +7,11 @@ from cpsd.cpsd import CPSDPipeline
 import math
 import torch.nn.functional as F
 from copy import deepcopy
+import math
 
 class Backbone(nn.Module):
 
-    def __init__(self, args, num_classes):
+    def __init__(self, args, num_classes, device):
         super(Backbone, self).__init__()
 
         self.num_classes = num_classes
@@ -19,6 +20,10 @@ class Backbone(nn.Module):
         
         self.fc = nn.Linear(in_features=self.net.fc.in_features, out_features=num_classes, bias=True)
         self.net.fc = nn.Identity()
+
+        self.device = device
+
+        self.args = args
 
         if args.c_resolution < 100:
             self.net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -105,15 +110,6 @@ class LUCIRBackbone(Backbone):
 
         self.lambda_cos_sim = math.sqrt(len(self.weights)) * float(self.lambda_base)
 
-    # def zap(self):
-
-    #     if self.zap_p:
-    #         # check if random number less than zap_p
-    #         current_id = self.task_id - 1
-    #         if torch.rand(1).item() < self.zap_p:
-    #             stdv = 1. / math.sqrt(self.weights[current_id].size(1))
-    #             self.weights[current_id].data.uniform_(-stdv, stdv)
-    #             self.weights[current_id].requires_grad = False
     
     def forward(self, x):
 
@@ -180,35 +176,12 @@ class LUCIRBackbone(Backbone):
                 
             loss += loss2 + loss3
 
-            
-            # fool_loss = self.fool_loss(z_hat, y, gen_y) * self.lambda_mr 
-            # loss += fool_loss
 
             acc = (y_hat.argmax(dim=1) == y_cat).float().mean()
 
         return loss, acc
 
-    # def fool_loss(self, z_hat, y, gen_y):
 
-    #     len_x = len(y)
-
-    #     z_hat_x = z_hat[:len_x, :]
-    #     z_hat_gen_x = z_hat[len_x:, :]
-
-    #     # Compute pairwise cosine similarity
-    #     z_hat_x_norm = F.normalize(z_hat_x, p=2, dim=1)
-    #     z_hat_gen_x_norm = F.normalize(z_hat_gen_x, p=2, dim=1)
-    #     cosine_sim = torch.mm(z_hat_x_norm, z_hat_gen_x_norm.t())
-
-    #     # Create labels for contrastive loss
-    #     positive_pairs = (y.unsqueeze(1) == gen_y.unsqueeze(0)).float()
-
-    #     # Compute contrastive loss
-    #     margin = 1.0  # Margin for contrastive loss
-    #     fool_loss = (1 - positive_pairs) * F.relu(margin - cosine_sim) + positive_pairs * (1 - cosine_sim)
-    #     fool_loss = fool_loss.mean()
-
-    #     return fool_loss
 
     def lucir_batch_hard_triplet_loss(self, labels, embeddings, k, margin, num_old_classes):
         """
@@ -262,13 +235,15 @@ class DINOAugment(nn.Module):
     
 class AnnealingBackbone(Backbone):
 
-    def __init__(self, args, num_classes, anti_discrim=False, init_option='old', plus=False):
-        super(AnnealingBackbone, self).__init__(args, num_classes)
+    def __init__(self, args, num_classes, anti_discrim=False, init_option='old', plus=False, device='cuda'):
+        super(AnnealingBackbone, self).__init__(args, num_classes, device=device)
 
         self.old_teacher = None
         self.new_teacher = None
         self.mse_loss = nn.MSELoss()
-        self.dino_augment = DINOAugment(224)
+        #self.dino_augment = DINOAugment(224)
+
+        # self.contrast_head = nn.Linear(in_features=self.fc.in_features, out_features=128, bias=True)
 
         self.mem_alpha = 0.5
         self.anti_discrim = anti_discrim
@@ -314,61 +289,23 @@ class AnnealingBackbone(Backbone):
                 for param, new_param in zip(self.fc.parameters(), self.new_teacher.fc.parameters()):
                     param.data = new_param.data.clone()
 
-        elif self.init_option == 'mean':
+        if self.init_option == 'mean':
             with torch.no_grad():
                 for param, old_param, new_param in zip(self.net.parameters(), self.old_teacher.net.parameters(), self.new_teacher.net.parameters()):
                     param.data = (old_param.data + new_param.data) / 2
 
                 for param, old_param, new_param in zip(self.fc.parameters(), self.old_teacher.fc.parameters(), self.new_teacher.fc.parameters()):
                     param.data = (old_param.data + new_param.data) / 2
-        
-        elif self.init_option == 'mean_d':
 
-            # mem alpha is a cosine function starts at 0.5 ends 0.75
-            self.mem_alpha = 0.5 + 0.25 * math.sin(math.pi * (self.task_id - 1) / 10)
-            # self.mem_alpha = 1 - 1 / (self.task_id + 1)
-            with torch.no_grad():
-                for param, old_param, new_param in zip(self.net.parameters(), self.old_teacher.net.parameters(), self.new_teacher.net.parameters()):
-                    param.data = old_param.data * self.mem_alpha + new_param * (1 - self.mem_alpha)
-
-                self.fc.weight.data = F.normalize(self.old_teacher.fc.weight.data, p=2, dim=1) * self.mem_alpha + F.normalize((self.new_teacher.fc.weight.data), p=2, dim=1) * (1 - self.mem_alpha)
-                self.fc.bias.data = self.old_teacher.fc.bias.data * self.mem_alpha + self.new_teacher.fc.bias.data * (1 - self.mem_alpha)
-                    
-        elif self.init_option == 'norm_mean':
-
-            self.mem_beta = 1 - 1 / (self.task_id + 1)
-            with torch.no_grad():
-                for param, old_param, new_param in zip(self.net.parameters(), self.old_teacher.net.parameters(), self.new_teacher.net.parameters()):
-                    param.data = F.normalize(old_param.data, p=2, dim=1) * self.mem_alpha + F.normalize((new_param.data), p=2, dim=1) * (1 - self.mem_alpha)
-
-                self.fc.weight.data = F.normalize(self.old_teacher.fc.weight.data, p=2, dim=1) * self.mem_alpha + F.normalize((self.new_teacher.fc.weight.data), p=2, dim=1) * (1 - self.mem_alpha)
-                self.fc.bias.data = self.old_teacher.fc.bias.data * self.mem_alpha + self.new_teacher.fc.bias.data * (1 - self.mem_alpha)
-
-
-        elif self.init_option == 'norm_mean_static':
-
-            with torch.no_grad():
-                for param, old_param, new_param in zip(self.net.parameters(), self.old_teacher.net.parameters(), self.new_teacher.net.parameters()):
-                    param.data = F.normalize(old_param.data, p=2, dim=1) * self.mem_alpha + F.normalize((new_param.data), p=2, dim=1) * (1 - self.mem_alpha)
-
-                self.fc.weight.data = F.normalize(self.old_teacher.fc.weight.data, p=2, dim=1) * self.mem_alpha + F.normalize((self.new_teacher.fc.weight.data), p=2, dim=1) * (1 - self.mem_alpha)
-                self.fc.bias.data = self.old_teacher.fc.bias.data * self.mem_alpha + self.new_teacher.fc.bias.data * (1 - self.mem_alpha)
+                # for param, old_param, new_param in zip(self.contrast_head.parameters(), self.old_teacher.contrast_head.parameters(), self.new_teacher.contrast_head.parameters()):
+                #     param.data = (old_param.data + new_param.data) / 2
 
         elif self.init_option == 'random':
             self.net = torchvision.models.resnet18()
             self.fc = nn.Linear(in_features=self.net.fc.in_features, out_features=self.num_classes, bias=True)
             self.net.fc = nn.Identity()
+            self.contrast_head = nn.Linear(in_features=self.fc.in_features, out_features=128, bias=True)
             self.to(self.device)
-
-        elif self.init_option == 'c_dino':
-            
-            with torch.no_grad():
-                for param, old_param, new_param in zip(self.net.parameters(), self.old_teacher.net.parameters(), self.new_teacher.net.parameters()):
-                    param.data = (old_param.data + new_param.data) / 2
-
-                for param, old_param, new_param in zip(self.fc.parameters(), self.old_teacher.fc.parameters(), self.new_teacher.fc.parameters()):
-                    param.data = (old_param.data + new_param.data) / 2
-
 
     def end_task(self):
 
@@ -378,41 +315,79 @@ class AnnealingBackbone(Backbone):
         return super().end_task()
 
 
-    def class_con_loss2(self, z, z_a, y):
+    # def class_con_loss2(self, z, z_a, y):
 
-        # Compute pairwise cosine similarity
-        z_norm = F.normalize(z, p=2, dim=1)
-        z_a_norm = F.normalize(z_a, p=2, dim=1)
-        cosine_sim = torch.mm(z_norm, z_a_norm.t())
+    #     # Compute pairwise cosine similarity
+    #     z_norm = F.normalize(z, p=2, dim=1)
+    #     z_a_norm = F.normalize(z_a, p=2, dim=1)
+    #     cosine_sim = torch.mm(z_norm, z_a_norm.t())
 
-        # prepapre labels where col is y and row is gen_y, for each row, the label is 1 if the row is the same as the col
-        positive_pairs = (y.unsqueeze(1) == y.unsqueeze(0)).float()
+    #     # prepapre labels where col is y and row is gen_y, for each row, the label is 1 if the row is the same as the col
+    #     positive_pairs = (y.unsqueeze(1) == y.unsqueeze(0)).float()
 
 
-        # Compute contrastive loss
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(cosine_sim, positive_pairs)
+    #     # Compute contrastive loss
+    #     loss = torch.nn.functional.binary_cross_entropy_with_logits(cosine_sim, positive_pairs)
 
-        return loss
+    #     return loss
 
-    def class_con_loss(self, z, y_cat):
+    # def class_con_loss(self, z, y_cat):
             
-        # randomly split z into z1 and z2
-        idx = torch.randperm(z.size(0))
-        z1 = z[idx[:len(y_cat)//2]]
-        z2 = z[idx[len(y_cat)//2:]]
+    #     # randomly split z into z1 and z2
+    #     idx = torch.randperm(z.size(0))
+    #     z1 = z[idx[:len(y_cat)//2]]
+    #     z2 = z[idx[len(y_cat)//2:]]
 
-        # Compute pairwise cosine similarity
-        z_norm_1 = F.normalize(z1, p=2, dim=1)
-        z_norm_2 = F.normalize(z2, p=2, dim=1)
-        cosine_sim = torch.mm(z_norm_1, z_norm_2.t())
+    #     # Compute pairwise cosine similarity
+    #     z_norm_1 = F.normalize(z1, p=2, dim=1)
+    #     z_norm_2 = F.normalize(z2, p=2, dim=1)
+    #     cosine_sim = torch.mm(z_norm_1, z_norm_2.t())
 
-        # prepapre labels where col is y and row is gen_y, for each row, the label is 1 if the row is the same as the col
-        positive_pairs = (y_cat[idx[:len(y_cat)//2]].unsqueeze(1) == y_cat[idx[len(y_cat)//2:]].unsqueeze(0)).float()
+    #     # prepapre labels where col is y and row is gen_y, for each row, the label is 1 if the row is the same as the col
+    #     positive_pairs = (y_cat[idx[:len(y_cat)//2]].unsqueeze(1) == y_cat[idx[len(y_cat)//2:]].unsqueeze(0)).float()
 
-        # Compute contrastive loss
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(cosine_sim, positive_pairs)
+    #     # Compute contrastive loss
+    #     loss = torch.nn.functional.binary_cross_entropy_with_logits(cosine_sim, positive_pairs)
 
-        return loss
+    #     return loss
+    
+    # def info_nce_loss(self, features):
+
+    #     if features.shape[0] <= 1:
+    #         return torch.tensor(0.0).to(self.device)
+        
+    #     features = self.contrast_head(features)
+
+    #     labels = torch.cat([torch.arange(features.shape[0] // 2) for i in range(2)], dim=0)
+    #     labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    #     labels = labels.to(self.device)
+
+    #     features = F.normalize(features, dim=1)
+
+    #     similarity_matrix = torch.matmul(features, features.T)
+    #     # assert similarity_matrix.shape == (
+    #     #     self.args.n_views * self.args.batch_size, self.args.n_views * self.args.batch_size)
+    #     # assert similarity_matrix.shape == labels.shape
+
+    #     # discard the main diagonal from both: labels and similarities matrix
+    #     mask = torch.eye(labels.shape[0], dtype=torch.bool).to(self.device)
+    #     labels = labels[~mask].view(labels.shape[0], -1)
+    #     similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+    #     # assert similarity_matrix.shape == labels.shape
+
+    #     # select and combine multiple positives
+    #     positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
+
+    #     # select only the negatives the negatives
+    #     negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
+
+    #     logits = torch.cat([positives, negatives], dim=1)
+    #     labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.device)
+
+    #     logits = logits / 0.07
+    #     loss = self.criterion(logits, labels)
+
+    #     return loss
     
     def replace_RELU_with_SILU(self):
         # for sparsity to work
@@ -445,21 +420,9 @@ class AnnealingBackbone(Backbone):
             x_cat = torch.cat([x, gen_x], dim=0)
             y_cat = torch.cat([y, gen_y], dim=0)
 
-        if self.init_option == 'c_dino':
-            x_cat_aug = self.dino_augment(x_cat)
-
-
 
         mse_loss = 0.0
-        # logits_mse_loss = 0.0
-        class_con_loss = 0.0
-        
-        
-        # # get label count in y_cat
-        # label_count = torch.bincount(y_cat)
-        # # class weight
-        # class_weight = 1 / label_count.float()
-        # criterion = nn.CrossEntropyLoss(weight=class_weight, num_classes=self.num_classes)
+
 
         if self.old_teacher is not None and self.training and gen_x is not None:
             
@@ -467,38 +430,31 @@ class AnnealingBackbone(Backbone):
                 _ , z_old = self.old_teacher(x_cat, return_z=True)
                 _ , z_new = self.new_teacher(x_cat, return_z=True)
 
-                ###
-                #x_cat_aug = self.dino_augment(x_cat)
-                #_ , z_aug = self(x_cat_aug, return_z=True)
-                ##
-                
             
             y_hat, z_student = self(x_cat, return_z=True)
             mse_loss = self.mem_alpha * self.mse_loss(z_student, z_old) + (1 - self.mem_alpha) * self.mse_loss(z_student, z_new)
-            ##
-            #class_con_loss = self.class_con_loss(torch.cat([z_student, z_aug], dim=0), torch.cat([y_cat, y_cat], dim=0))
-            ##
+
 
             if self.anti_discrim:
                 gen_start_idx = len(x)
                 ce_loss = self.criterion(y_hat[gen_start_idx:], y_cat[gen_start_idx:]) + 0.1 * (1 - self.mem_alpha) * self.criterion(y_hat[:gen_start_idx], y_cat[:gen_start_idx])
-                #logits_mse_loss = (1 - self.mem_alpha) * self.mse_loss(y_hat[:len(y)], y_new[:len(y)]) 
+
             else:
                 ce_loss = self.criterion(y_hat, y_cat)
 
 
-            loss = ce_loss + mse_loss + 0.01 * class_con_loss
+            loss = ce_loss + mse_loss
             acc = (y_hat.argmax(dim=1) == y_cat).float().mean()
 
         else:
             y_hat, z_hat = self(x_cat, return_z=True)
-            if self.init_option == 'c_dino':
-                _ , z_hat_aug = self(x_cat_aug, return_z=True)
-                class_con_loss = self.class_con_loss2(z_hat, z_hat_aug, y_cat)
-                loss = self.criterion(y_hat[:len(y)], y_cat[:len(y)]) + class_con_loss
 
-            elif self.plus:
-                #class_con_loss = self.class_con_loss(z_hat, y_cat)
+
+            if self.plus:
+
+                # info_nce_loss = 0.0
+                # if self.training:
+                #     info_nce_loss = self.info_nce_loss(z_hat)
                 loss = self.criterion(y_hat, y_cat)
             else:
                 loss = self.criterion(y_hat, y_cat)
@@ -506,91 +462,3 @@ class AnnealingBackbone(Backbone):
             acc = (y_hat.argmax(dim=1) == y_cat).float().mean()
 
         return loss, acc
-
-
-        
-
-
-        
-        
-
-
-# class DINOBackbone(Backbone):
-    
-#     def __init__(self, num_classes, pipeline:CPSDPipeline, c_resolution):
-#         super(DINOBackbone, self).__init__(num_classes)
-
-#         self.pipeline = pipeline
-#         self.crop1 = K.RandomResizedCrop(size=(c_resolution, c_resolution), scale=(0.4, 1.0), keepdim=True, resample=kornia.constants.Resample.BICUBIC)
-#         self.crop2 = K.RandomResizedCrop(size=(c_resolution, c_resolution), scale=(0.75, 1.0), keepdim=True, resample=kornia.constants.Resample.BICUBIC)
-#         self.normalize = K.Normalize(mean=0.5, std=0.5)
-#         self.jitter = K.ColorJitter(0.05, 0.05, 0.05, 0.02)
-#         self.blur = K.RandomBoxBlur(kernel_size=(3, 3), p=0.5)
-#         self.mse_loss = nn.MSELoss()
-
-#     def augment(self, x, prompts):
-        
-#         with torch.no_grad():
-#             # random crop
-#             x1 = self.crop1(x)
-#             x2 = self.crop1(x)
-
-#             # boomerang aug
-#             x1 = self.jitter(self.blur(x1))
-#             x2 = self.jitter(self.blur(x2))
-
-#             # crop again
-#             x1 = self.crop2(x1)
-#             x2 = self.crop2(x2)
-
-#             # normalize
-#             x1 = self.normalize(x1).detach()
-#             x2 = self.normalize(x2).detach()
-
-#         return x1, x2
-
-#     def forward(self, x, return_z=False):
-#         z = self.net(x)
-#         y = self.fc(z)[:, :self.class_range]
-
-#         if return_z:
-
-#             return y, z
-#         else:
-#             return y
-
-#     def observe(self, x, y, prompt=None, gen_x=None, gen_y=None, gen_prompt=None):
-
-#         if self.training:
-
-#             x1, x2 = self.augment(x, prompt)
-
-#             if gen_x is None:
-
-#                 y_hat_1, z_hat_1 = self(x1, return_z=True)
-#                 y_hat_2, z_hat_2 = self(x2, return_z=True)
-
-#                 y_hat_cat = torch.cat([y_hat_1, y_hat_2], dim=0)
-#                 y_cat = torch.cat([y, y], dim=0)
-
-                
-
-#             else:
-#                 gen_x1, gen_x2 = self.augment(gen_x, gen_prompt)
-
-#                 x_cat_1 = torch.cat([x1, gen_x1], dim=0)
-#                 x_cat_2 = torch.cat([x2, gen_x2], dim=0)
-
-#                 y_cat = torch.cat([y,y, gen_y, gen_y], dim=0)
-
-#                 y_hat_1, z_hat_1 = self(x_cat_1, return_z=True)
-#                 y_hat_2, z_hat_2 = self(x_cat_2, return_z=True)
-
-#                 y_hat_cat = torch.cat([y_hat_1, y_hat_2], dim=0)
-
-#             loss = self.criterion(y_hat_cat, y_cat) + 1e-2 * self.mse_loss(z_hat_1, z_hat_2)
-#             acc = (y_hat_cat.argmax(dim=1) == y_cat).float().mean()
-#             return loss, acc
-#         else:
-#             return super().observe(x, y, gen_x, gen_y)
-

@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument('--syn_only', action='store_true', help='Only use synthetic data for training')
     parser.add_argument('--anti_discrim', action='store_true', help='Use anti-discriminator')
     parser.add_argument('--c_anneal_epochs', type=int, default=5, help='Number of annealing epochs')
-    parser.add_argument('--init_option', type=str, default='random', choices=['random','old', 'new', 'mean', 'mean_d', 'norm_mean', 'norm_mean_static','c_dino'], help='Initialization option')
+    parser.add_argument('--init_option', type=str, default='random', choices=['random','old', 'new', 'mean'], help='Initialization option')
     parser.add_argument('--use_c_l1', action='store_true', help='Use L1 loss for training')
 
 
@@ -49,7 +49,7 @@ def parse_args():
     parser.add_argument('--run_name', type=str, default='debug')
     parser.add_argument('--pretrained_model_name_or_path', type=str, default='/home/ilee0022/cl-gen/models/miniSD-diffusers')
     parser.add_argument('--model_name', type=str, default='miniSD-diffusers')
-    parser.add_argument('--method', type=str, default='cpsd', choices=['cpsd', 'cpsd+', 'cpsd_cont', 'replay', 'cpsd2', 'sd'], help='Method to use for training')
+    parser.add_argument('--method', type=str, default='cpsd', choices=['cpsd', 'cpsd+', 'cpsd_cont', 'replay', 'cpsd2', 'sd','ti'], help='Method to use for training')
 
     ## CPSD args ##
     # data

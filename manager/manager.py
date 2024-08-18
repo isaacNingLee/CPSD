@@ -10,6 +10,7 @@ from torchvision import transforms
 import pandas as pd
 import random
 from cpsd.cpsd import CPSDPipeline
+from cpsd.ti import TIPipeline
 import math
 from PIL import Image
 from diffusers import PNDMScheduler
@@ -53,10 +54,12 @@ class Manager:
 
 
         if not args.c_dino:
-            self._train_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True, interpolation=Image.LANCZOS), 
-                                                     transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1), 
+            # from SIMCLr
+            self._train_transforms = transforms.Compose([transforms.RandomResizedCrop(args.c_resolution, antialias=True), 
                                                      transforms.RandomHorizontalFlip(p=0.5), 
-                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.6, 1.0), interpolation=Image.LANCZOS, antialias=True), 
+                                                     transforms.RandomApply([transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8 , hue=0.2)], p=0.8),
+                                                     transforms.RandomGrayscale(p=0.2),
+                                                     transforms.GaussianBlur(kernel_size=(int(0.1 * args.c_resolution) // 2) * 2 + 1),
                                                      transforms.ToTensor(), 
                                                      transforms.Normalize(mean=[0.5], std=[0.5])])
         else:
@@ -72,32 +75,67 @@ class Manager:
                                                      transforms.Normalize(mean=[0.5], std=[0.5]),
                                                      transforms.RandomResizedCrop(args.c_resolution, scale=(0.2, 0.6), interpolation=Image.BICUBIC)])
         
-        self._val_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True, interpolation=Image.LANCZOS), transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
+        self._val_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True), transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
 
 
 
-        def preprocess(examples, label_map, transform):
-            if len(examples.keys()) == 1:
-                if 'pixel_value' in examples:
-                    processed_images = []
-                    for image in examples['image']:
-                        processed_images.append(transform(image.convert('RGB')))
-                    examples['pixel_values'] = torch.stack(processed_images)
-                    examples.pop('image', None)
-                    return examples
-                else:
-                    if 'cl_label' in examples:
-                        examples['cl_label'] = torch.tensor([label_map[label] for label in examples['label']])
+        def preprocess(examples, label_map, transform, contrast=False):
+
+            if not contrast:
+                if len(examples.keys()) == 1:
+                    if 'pixel_value' in examples:
+                        processed_images = []
+                        for image in examples['image']:
+                            processed_images.append(transform(image.convert('RGB')))
+                        examples['pixel_values'] = torch.stack(processed_images)
+                        examples.pop('image', None)
                         return examples
-                    if 'label' in examples:
-                        return examples
-            processed_images = []
-            for image in examples['image']:
-                processed_images.append(transform(image.convert('RGB')))
-            examples['pixel_values'] = torch.stack(processed_images)
-            examples.pop('image', None)
-            examples['cl_label'] = torch.tensor([label_map[label] for label in examples['label']])
-            return examples
+                    else:
+                        if 'cl_label' in examples:
+                            examples['cl_label'] = torch.tensor([label_map[label] for label in examples['label']])
+                            return examples
+                        if 'label' in examples:
+                            return examples
+                processed_images = []
+                for image in examples['image']:
+                    processed_images.append(transform(image.convert('RGB')))
+
+                examples['pixel_values'] = torch.stack(processed_images)
+                examples.pop('image', None)
+                examples['cl_label'] = torch.tensor([label_map[label] for label in examples['label']])
+                return examples
+            
+            else:
+                if len(examples.keys()) == 1:
+                    if 'pixel_value' in examples:
+                        processed_images1 = []
+                        processed_images2 = []
+                        for image in examples['image']:
+                            processed_images1.append(transform(image.convert('RGB')))
+                            processed_images2.append(transform(image.convert('RGB')))
+                        examples['pixel_values'] = torch.stack(processed_images1)
+                        examples['pixel_values2'] = torch.stack(processed_images2)
+                        examples.pop('image', None)
+                    
+                    else:
+                        if 'cl_label' in examples:
+                            examples['cl_label'] = torch.tensor([label_map[label] for label in examples['label']])
+                            return examples
+                        if 'label' in examples:
+                            return examples
+                        
+                processed_images1 = []
+                processed_images2 = []
+                for image in examples['image']:
+                    processed_images1.append(transform(image.convert('RGB')))
+                    processed_images2.append(transform(image.convert('RGB')))
+                examples['pixel_values'] = torch.stack(processed_images1)
+                examples['pixel_values2'] = torch.stack(processed_images2)
+                examples.pop('image', None)
+                examples['cl_label'] = torch.tensor([label_map[label] for label in examples['label']])
+                return examples
+
+
         
         self.preprocess = preprocess
 
@@ -143,7 +181,7 @@ class Manager:
 
             if phase == 'train':
                 
-                dataset[phase].set_transform(lambda examples: self.preprocess(examples, self.class2cl, self._train_transforms))
+                dataset[phase].set_transform(lambda examples: self.preprocess(examples, self.class2cl, self._train_transforms, self.args.trainer == 'anneal+'))
 
             else:
                 dataset[phase].set_transform(lambda examples: self.preprocess(examples, self.class2cl, self._val_transforms))
@@ -177,6 +215,9 @@ class Manager:
 
         return task_ids, class_to_cl_idx
 
+    def get_class_name(self, class_id):
+        return self.label2text[str(class_id)].split(',')[0]
+    
     def load_dataset(self):
 
         with open(self.args.dataset_path + '/label2text.json') as f:
@@ -209,6 +250,8 @@ class Manager:
         self.val_ratio = len(self.dataset['validation']) / len(self.dataset['train'])
 
     def sample_boomerang(self, prev_task_class_ids, pipeline: CPSDPipeline, task_id, train_dataloader):
+
+        pipeline.unload_embed_trans()
         n_rep_per_class = self.args.n_replay
 
         # if self.args.shared_gen_replay:
@@ -225,13 +268,17 @@ class Manager:
         guidance_scale = []
         for class_id in prev_task_class_ids:
 
-            if self.args.method != 'sd':
-                if self.args.prepared_cpsd_path:
-                    pipeline.load_embed_trans(self.args.prepared_cpsd_path + f'/class_{class_id}.pt')
-                else:
-                    pipeline.load_embed_trans(self.args.output_dir + f'/cp_embeddings/class_{class_id}.pt')
+            # if self.args.method != 'sd':
+            #     if self.args.prepared_cpsd_path:
+            #         pipeline.load_embed_trans(self.args.prepared_cpsd_path + f'/class_{class_id}.pt')
+            #     else:
+            #         pipeline.load_embed_trans(self.args.output_dir + f'/cp_embeddings/class_{class_id}.pt')
 
-            prompts = [f"{self.label2text[str(class_id)].split(',')[0]}, {random.choice(self.unique_desc[class_id])}" for _ in range(n_rep_per_class)]
+            if self.args.v2_desc:
+                prompts = [f"{self.label2text[str(class_id)].split(',')[0]}, {random.choice(self.unique_desc[class_id])}" for _ in range(n_rep_per_class)]
+            else:
+                prompts = [f"{self.label2text[str(class_id)].split(',')[0]}" for _ in range(n_rep_per_class)]
+                
             replay_path = replay_dir + f'/class_{class_id}'
             generated = 0
             print(f'Generating {len(prompts)} samples for class {class_id}.....')
@@ -239,7 +286,7 @@ class Manager:
             for batch in train_dataloader:
 
                 images = batch['pixel_values'].to(self.device)
-                rnd_guidance_scale = np.random.uniform(0.3, 0.99)
+                rnd_guidance_scale = np.random.uniform(0.2, 0.75)
                 
                 bs = len(images) if len(images) < n_rep_per_class - generated else max(n_rep_per_class - generated, 0)
 
@@ -453,10 +500,8 @@ class Manager:
 
 
         return aug_train_loader
-
-
-
-    def sample_clip_proj(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id):
+    
+    def sample_ti(self, prev_current_task_class_ids, pipeline: TIPipeline, task_id):
         n_rep_per_class = self.args.n_replay
 
         if self.args.shared_gen_replay:
@@ -473,13 +518,16 @@ class Manager:
         guidance_scale = []
         for class_id in prev_current_task_class_ids:
             
-            if self.args.method != 'sd':
-                if self.args.prepared_cpsd_path:
-                    pipeline.load_embed_trans(self.args.prepared_cpsd_path + f'/class_{class_id}.pt')
-                else:
-                    pipeline.load_embed_trans(self.args.output_dir + f'/cp_embeddings/class_{class_id}.pt')
+            
+            if self.args.prepared_cpsd_path:
+                pipeline.load_ti_embed(self.args.prepared_cpsd_path + f'/class_{class_id}.safetensors')
+            else:
+                pipeline.load_ti_embed(self.args.output_dir + f'/ti_embeddings/class_{class_id}.safetensors')
 
-            prompts = [f"{self.label2text[str(class_id)].split(',')[0]}, {random.choice(self.unique_desc[class_id])}" for _ in range(n_rep_per_class)]
+            if self.args.v2_desc:
+                prompts = [f"<{self.label2text[str(class_id)].split(',')[0]}>, {random.choice(self.unique_desc[class_id])}" for _ in range(n_rep_per_class)]
+            else:
+                prompts = [f"<{self.label2text[str(class_id)].split(',')[0]}>" for _ in range(n_rep_per_class)]
             replay_path = replay_dir + f'/class_{class_id}'
             generated = 0
             print(f'Generating {len(prompts)} samples for class {class_id}.....')
@@ -516,7 +564,71 @@ class Manager:
 
         return replay_dir
 
-    def prepare_gen_dataset(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id):
+
+    def sample_clip_proj(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id):
+        n_rep_per_class = self.args.n_replay
+
+        if self.args.shared_gen_replay:
+            replay_dir = self.args.output_dir + f'/gen_samples'
+        else:
+            replay_dir = self.args.output_dir + f'/gen_samples/task_{task_id}'
+            
+        if not os.path.isdir(replay_dir):
+            os.makedirs(replay_dir, exist_ok=True)
+
+        filename = []
+        labels = []
+        text = []
+        guidance_scale = []
+        for class_id in prev_current_task_class_ids:
+            
+            if self.args.method != 'sd':
+                if self.args.prepared_cpsd_path:
+                    pipeline.load_embed_trans(self.args.prepared_cpsd_path + f'/class_{class_id}.pt')
+                else:
+                    pipeline.load_embed_trans(self.args.output_dir + f'/cp_embeddings/class_{class_id}.pt')
+
+            if self.args.v2_desc:
+                prompts = [f"{self.label2text[str(class_id)].split(',')[0]}, {random.choice(self.unique_desc[class_id])}" for _ in range(n_rep_per_class)]
+            else:
+                prompts = [f"{self.label2text[str(class_id)].split(',')[0]}" for _ in range(n_rep_per_class)]
+            replay_path = replay_dir + f'/class_{class_id}'
+            generated = 0
+            print(f'Generating {len(prompts)} samples for class {class_id}.....')
+            while generated < len(prompts):
+                batch_size = min(self.args.max_gen_batch_size, len(prompts) - generated)
+                rnd_guidance_scale = np.random.uniform(5, 9)
+                
+                gen_output = pipeline(prompts[generated:generated + batch_size], num_inference_steps=self.args.num_inference_steps, width=self.args.cpsd_resolution, height=self.args.cpsd_resolution, guidance_scale=rnd_guidance_scale)
+                
+                images = gen_output.images
+                has_error = gen_output.nsfw_content_detected
+                
+
+                for i, img in enumerate(images):
+
+                    if not has_error[i]:
+                        file = f'replay_{generated + i}.jpeg'
+                        filename.append(f'class_{class_id}_{file}')
+                        labels.append(class_id)
+                        text.append(self.label2text[str(class_id)].split(',')[0])
+                        guidance_scale.append(rnd_guidance_scale)
+                        img.save(replay_path + f'_{file}')
+
+                        generated += 1
+
+                print(f'Generated {generated} samples')
+        metadata = {'file_name': filename, 'label': labels, 'text': text, 'ucg': guidance_scale}
+        metadata = pd.DataFrame(metadata)
+
+        # check if metadata file already exists
+        if os.path.exists(replay_dir + '/metadata.csv'):
+            metadata = pd.concat([pd.read_csv(replay_dir + '/metadata.csv'), metadata], ignore_index=True)
+        metadata.to_csv(replay_dir + '/metadata.csv', index=False)
+
+        return replay_dir
+
+    def prepare_gen_dataset(self, prev_current_task_class_ids, pipeline, task_id):
         print(f'Preparing dataset for CLIP projection for task {task_id}....')
 
         if self.args.prepared_gen_dataset_path:
@@ -528,7 +640,10 @@ class Manager:
 
                 dataset[phase] = deepcopy(dataset[phase].select(indices))
         else:
-            replay_dir = self.sample_clip_proj(prev_current_task_class_ids, pipeline, task_id)
+            if self.args.method == 'ti':
+                replay_dir = self.sample_ti(prev_current_task_class_ids, pipeline, task_id)
+            else:
+                replay_dir = self.sample_clip_proj(prev_current_task_class_ids, pipeline, task_id)
             dataset = load_dataset('imagefolder', data_dir=replay_dir)
 
         dataset = dataset['train'].train_test_split(test_size=self.val_ratio, seed=self.args.seed, shuffle=True)
@@ -543,7 +658,7 @@ class Manager:
 
         return dataset
 
-    def get_gen_dataloader(self, prev_current_task_class_ids, pipeline: CPSDPipeline, task_id, batch_size):
+    def get_gen_dataloader(self, prev_current_task_class_ids, pipeline, task_id, batch_size):
         gen_dataset = self.prepare_gen_dataset(prev_current_task_class_ids, pipeline, task_id)
         gen_dataloader = {}
         for phase in ['train', 'validation']:
