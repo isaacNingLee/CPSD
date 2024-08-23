@@ -4,3 +4,6 @@ output
 logs
 wandb
 prepared_ci_dat
+prepared_gen_dat
+backup
+*.pyc

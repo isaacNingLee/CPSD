@@ -36,6 +36,7 @@ def parse_args():
 
 
     parser.add_argument('--n_replay', type=int, default=100, help='Number of replay samples per class')
+    parser.add_argument('--n_aug', type=int, default=10, help='Number of augmentation samples per class')
     parser.add_argument('--max_replay_set_size', type=int, default=50000, help='Maximum size of replay set')
     parser.add_argument('--max_gen_batch_size', type=int, default = 16, help='Maximum batch size for generation')
     parser.add_argument('--num_inference_steps', type=int, default=20, help='Number of inference steps for generation')

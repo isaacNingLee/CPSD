@@ -53,27 +53,14 @@ class Manager:
         self.device = device
 
 
-        if not args.c_dino:
-            # from SIMCLr
-            self._train_transforms = transforms.Compose([transforms.RandomResizedCrop(args.c_resolution, antialias=True), 
+   
+        self._train_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True, interpolation=Image.LANCZOS), 
+                                                     transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1), 
                                                      transforms.RandomHorizontalFlip(p=0.5), 
-                                                     transforms.RandomApply([transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8 , hue=0.2)], p=0.8),
-                                                     transforms.RandomGrayscale(p=0.2),
-                                                     transforms.GaussianBlur(kernel_size=(int(0.1 * args.c_resolution) // 2) * 2 + 1),
+                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.6, 1.0), interpolation=Image.LANCZOS, antialias=True), 
                                                      transforms.ToTensor(), 
                                                      transforms.Normalize(mean=[0.5], std=[0.5])])
-        else:
-            self._train_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True), 
-                                                     transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1), 
-                                                     transforms.RandomSolarize(0.2),
-                                                     transforms.RandomHorizontalFlip(p=0.5), 
-                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.6, 1.0), interpolation=Image.BICUBIC), 
-                                                     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05), 
-                                                     transforms.RandomSolarize(0.1),
-                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.8, 1.0), interpolation=Image.BICUBIC), 
-                                                     transforms.ToTensor(), 
-                                                     transforms.Normalize(mean=[0.5], std=[0.5]),
-                                                     transforms.RandomResizedCrop(args.c_resolution, scale=(0.2, 0.6), interpolation=Image.BICUBIC)])
+
         
         self._val_transforms = transforms.Compose([transforms.Resize((args.c_resolution, args.c_resolution), antialias=True), transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
 
@@ -252,7 +239,7 @@ class Manager:
     def sample_boomerang(self, prev_task_class_ids, pipeline: CPSDPipeline, task_id, train_dataloader):
 
         pipeline.unload_embed_trans()
-        n_rep_per_class = self.args.n_replay
+        n_rep_per_class = self.args.n_aug
 
         # if self.args.shared_gen_replay:
         #     replay_dir = self.args.output_dir + f'/aug_samples'
@@ -295,7 +282,7 @@ class Manager:
 
                 guidance_scale.extend([rnd_guidance_scale] * bs)
 
-                aug_imgs = pipeline.boomerang_aug(img = images[:bs], prompt = prompts[generated:generated + bs], percent_noise = rnd_guidance_scale, num_inference_steps=50)
+                aug_imgs = pipeline.boomerang_aug(img = images[:bs], prompt = prompts[generated:generated + bs], percent_noise = rnd_guidance_scale, num_inference_steps=30)
 
                 for i, img in enumerate(aug_imgs):
                     file = f'replay_{generated + i}.jpeg'

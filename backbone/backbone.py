@@ -297,14 +297,11 @@ class AnnealingBackbone(Backbone):
                 for param, old_param, new_param in zip(self.fc.parameters(), self.old_teacher.fc.parameters(), self.new_teacher.fc.parameters()):
                     param.data = (old_param.data + new_param.data) / 2
 
-                # for param, old_param, new_param in zip(self.contrast_head.parameters(), self.old_teacher.contrast_head.parameters(), self.new_teacher.contrast_head.parameters()):
-                #     param.data = (old_param.data + new_param.data) / 2
 
         elif self.init_option == 'random':
             self.net = torchvision.models.resnet18()
             self.fc = nn.Linear(in_features=self.net.fc.in_features, out_features=self.num_classes, bias=True)
             self.net.fc = nn.Identity()
-            self.contrast_head = nn.Linear(in_features=self.fc.in_features, out_features=128, bias=True)
             self.to(self.device)
 
     def end_task(self):
@@ -389,23 +386,23 @@ class AnnealingBackbone(Backbone):
 
     #     return loss
     
-    def replace_RELU_with_SILU(self):
-        # for sparsity to work
+    # def replace_RELU_with_SILU(self):
+    #     # for sparsity to work
             
-        for name, module in self.net.named_children():
-            if isinstance(module, nn.ReLU):
-                setattr(self.net, name, nn.SiLU())
+    #     for name, module in self.net.named_children():
+    #         if isinstance(module, nn.ReLU):
+    #             setattr(self.net, name, nn.SiLU())
 
 
-    def l1_loss(self):
-        loss = 0
-        for param in self.net.parameters():
-            loss += torch.norm(param, 1)
+    # def l1_loss(self):
+    #     loss = 0
+    #     for param in self.net.parameters():
+    #         loss += torch.norm(param, 1)
 
-        for param in self.fc.parameters():
-            loss += torch.norm(param, 1)
+    #     for param in self.fc.parameters():
+    #         loss += torch.norm(param, 1)
 
-        return loss
+    #     return loss
 
 
 
@@ -450,14 +447,8 @@ class AnnealingBackbone(Backbone):
             y_hat, z_hat = self(x_cat, return_z=True)
 
 
-            if self.plus:
 
-                # info_nce_loss = 0.0
-                # if self.training:
-                #     info_nce_loss = self.info_nce_loss(z_hat)
-                loss = self.criterion(y_hat, y_cat)
-            else:
-                loss = self.criterion(y_hat, y_cat)
+            loss = self.criterion(y_hat, y_cat)
 
             acc = (y_hat.argmax(dim=1) == y_cat).float().mean()
 

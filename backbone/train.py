@@ -248,113 +248,7 @@ class Trainer():
 
 
 
-# class DINOTrainer(Trainer):
 
-#     def __init__(self, args, model: DINOBackbone, device):
-#         super().__init__(args, model, device)
-
-#     def train(self, task_id, task_ids: dict, train_loader, val_loader, test_loader_list, gen_train_loader=None, gen_val_loader=None):
-
-#         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.c_lr, weight_decay=self.args.c_wd)
-#         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[30], gamma=0.1)
-
-#         for epoch in range(self.args.c_epochs):
-
-#             train_acc_accum = 0
-#             train_loss_accum = 0
-
-
-#             self.model.train()
-
-#             if gen_train_loader is None:
-#                 for i, batch in tqdm.tqdm(enumerate(train_loader)):
-#                     x, y, prompts = batch['pixel_values'].to(self.device), batch['cl_label'].to(self.device), batch['text']
-
-#                     self.optimizer.zero_grad()
-#                     loss, acc = self.model.observe(x, y, prompts)
-
-
-#                     loss.backward()
-#                     self.optimizer.step()
-
-#                     train_acc_accum += acc.item()
-#                     train_loss_accum += loss.item()
-
-            
-#             else:
-
-#                 for i, (batch, gen_batch) in tqdm.tqdm(enumerate(zip(train_loader, gen_train_loader))):
-#                     x, y, prompts = batch['pixel_values'].to(self.device), batch['cl_label'].to(self.device), batch['text']
-#                     gen_x, gen_y, gen_prompts = gen_batch['pixel_values'].to(self.device), gen_batch['cl_label'].to(self.device), gen_batch['text']
-
-#                     self.optimizer.zero_grad()
-#                     loss, acc = self.model.observe(x, y, prompts, gen_x, gen_y, gen_prompts)
-#                     loss.backward()
-#                     self.optimizer.step()
-
-#                     train_acc_accum += acc.item()
-#                     train_loss_accum += loss.item()
-
-#             train_acc_accum /= len(train_loader)
-#             train_acc_accum *= 100
-#             train_loss_accum /= len(train_loader)
-
-#             print(f"Epoch {epoch} - Train Loss: {train_loss_accum} - Train Acc: {train_acc_accum}%")
-#             wandb.log({"Train Loss": train_loss_accum, "Train Acc": train_acc_accum})
-
-#             self.scheduler.step()
-
-#             self.model.eval()
-
-#             val_acc_accum = 0
-#             val_loss_accum = 0
-#             with torch.no_grad():
-#                 # print((self.model.fc.weight).norm(dim=0)[:self.model.class_range])
-#                 # print(self.model.fc.bias)
-#                 if gen_val_loader is None:
-#                     for i, batch in enumerate(val_loader):
-#                         x, y = batch['pixel_values'].to(self.device), batch['cl_label'].to(self.device)
-
-#                         loss, acc = self.model.observe(x, y)
-
-#                         val_acc_accum += acc.item()
-#                         val_loss_accum += loss.item()
-
-#                 else:
-#                     for i, (batch, gen_batch) in enumerate(zip(val_loader, gen_val_loader)):
-#                         x, y = batch['pixel_values'].to(self.device), batch['cl_label'].to(self.device)
-#                         gen_x, gen_y = gen_batch['pixel_values'].to(self.device), gen_batch['cl_label'].to(self.device)
-
-#                         loss, acc = self.model.observe(x, y, gen_x, gen_y)
-
-#                         val_acc_accum += acc.item()
-#                         val_loss_accum += loss.item()
-
-#             val_acc_accum /= len(val_loader)
-#             val_acc_accum *= 100
-#             val_loss_accum /= len(val_loader)
-
-#             print(f"Epoch {epoch} - Val Loss: {val_loss_accum} - Val Acc: {val_acc_accum}%")
-#             wandb.log({"Val Loss": val_loss_accum, "Val Acc": val_acc_accum})
-
-#             accs = self.evaluate(test_loader_list, task_ids, self.device)
-#             mean_acc = np.mean(accs, axis=1)
-#             print_mean_accuracy(mean_acc, task_id)
-
-#             d2={'RESULT_step_class_mean_accs': mean_acc[0], 'RESULT_step_task_mean_accs': mean_acc[1],
-#                 **{f'RESULT_step_class_acc_{i}': a for i, a in enumerate(accs[0])},
-#                 **{f'RESULT_step_task_acc_{i}': a for i, a in enumerate(accs[1])}}
-            
-#             wandb.log(d2)
-
-#             print(d2)
-
-#         d2 = {'RESULT_class_mean_accs': mean_acc[0], 'RESULT_task_mean_accs': mean_acc[1],
-#             **{f'RESULT_class_acc_{i}': a for i, a in enumerate(accs[0])},
-#             **{f'RESULT_task_acc_{i}': a for i, a in enumerate(accs[1])}}
-
-#         wandb.log(d2)
-#         print(d2)
 
 
 class AnnealTrainer(Trainer):
@@ -362,8 +256,6 @@ class AnnealTrainer(Trainer):
     def __init__(self, args, model: AnnealingBackbone, device):
         super().__init__(args, model, device)
 
-        if self.args.use_c_l1:
-            self.model.replace_RELU_with_SILU()
     
 
     def train(self, task_id, task_ids: dict, train_loader, val_loader, test_loader_list, gen_train_loader=None, gen_val_loader=None):
@@ -383,9 +275,6 @@ class AnnealTrainer(Trainer):
 
             self.model.train()
 
-
-
-
             for i, batch in tqdm.tqdm(enumerate(train_loader)):
 
 
@@ -401,9 +290,6 @@ class AnnealTrainer(Trainer):
 
 
                 loss.backward()
-                # clip gradient norm
-                # if self.args.clip_grad_norm:
-                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
 
 
                 self.optimizer.step()
@@ -578,6 +464,9 @@ class AnnealTrainerPlus(Trainer):
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.c_lr, weight_decay=self.args.c_wd)
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[self.args.c_epochs - 10], gamma=0.1)
 
+        if aug_train_loader is not None:
+            aug_train_loader = itertools.cycle(aug_train_loader)
+
         if task_id > 0:
             old_teacher = deepcopy(self.model)
             
@@ -602,15 +491,11 @@ class AnnealTrainerPlus(Trainer):
                 self.optimizer.zero_grad()
                 loss, acc = self.model.observe(x, y)
 
-                if self.args.use_c_l1:
-                    l1_loss = self.model.l1_loss()
-                    loss += self.args.c_wd * l1_loss
+
 
 
                 loss.backward()
-                # clip gradient norm
-                # if self.args.clip_grad_norm:
-                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+
 
 
                 self.optimizer.step()

@@ -204,7 +204,7 @@ for task_id in range(args.total_task):
             replay_ids = prev_current_ids + current_task_class_ids
 
         if task_id > 0:
-            gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size) #####
+            gen_train_loader, gen_val_loader = dataset_manager.get_gen_dataloader(replay_ids, pipeline, task_id, batch_size = batch_size // 2) #####
         else:
             gen_train_loader, gen_val_loader = None, None
 
@@ -238,9 +238,9 @@ for task_id in range(args.total_task):
         num_workers = train_loader.num_workers
         pin_memory = train_loader.pin_memory
 
-        prep_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory, collate_fn=custom_collate_fn)
+        prep_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, num_workers=num_workers, pin_memory=pin_memory, collate_fn=custom_collate_fn) # low batch size for more diversity
 
-        aug_train_loader = dataset_manager.get_aug_dataloader(prev_current_ids + current_task_class_ids, pipeline, task_id, prep_loader, batch_size = batch_size) 
+        aug_train_loader = dataset_manager.get_aug_dataloader(prev_current_ids + current_task_class_ids, pipeline, task_id, prep_loader, batch_size = batch_size if task_id == 0 else batch_size // 2) 
 
 
 

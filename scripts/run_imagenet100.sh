@@ -1,8 +1,8 @@
 python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/miniSD-diffusers \
                 --dataset_path=/home/ilee0022/cl-gen/datasets/imagenet100/huggingface \
                 --prepared_dataset_path=/home/ilee0022/cl-gen/CPSD/prepared_ci_dat/Imagenet100_prep \
-                --prepared_cpsd_path=/home/ilee0022/cl-gen/CPSD/output/20240812-040949_cpsd_imagenet100_gen_v2/cp_embeddings \
-                --prepared_gen_dataset_path=/home/ilee0022/cl-gen/CPSD/output/20240812-040949_cpsd_imagenet100_gen_v2/gen_samples \
+                --prepared_cpsd_path=/home/ilee0022/cl-gen/CPSD/prepared_gen_dat/20240813-030222_ti_imagenet100_gen_v2/cp_embeddings \
+                --prepared_gen_dataset_path=/home/ilee0022/cl-gen/CPSD/prepared_gen_dat/20240813-030222_ti_imagenet100_gen_v2/gen_samples \
                 --cpsd_resolution=256 \
                 --cpsd_batch_size=4 \
                 --cpsd_gradient_accumulation_steps=1 \
@@ -20,6 +20,7 @@ python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/min
                 --base_task_class_num=10 \
                 --total_task=10 \
                 --n_replay=1300 \
+                --n_aug=130 \
                 --cpsd_scale_lr \
                 --num_inference_steps=20 \
                 --c_epochs=40 \
@@ -27,13 +28,13 @@ python main.py  --pretrained_model_name_or_path=/home/ilee0022/cl-gen/models/min
                 --c_resolution=224 \
                 --c_batch_size=128 \
                 --c_wd=0.0001 \
-                --method=cpsd \
+                --method=ti \
                 --project_name=imagenet100 \
-                --run_name=cpsd_imagenet100_anneal_v2_10 \
+                --run_name=ti_imagenet100_anneal_v2_2 \
                 --trainer=anneal \
                 --shared_gen_replay \
                 --max_gen_batch_size=4 \
-                --c_anneal_epochs=5 \
+                --c_anneal_epochs=1 \
                 --anti_discrim \
                 --init_option=mean \
                 --cpsd_scheduler=DPMSolver \
