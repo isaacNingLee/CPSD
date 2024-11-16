@@ -1,7 +1,7 @@
 
 # DR-CPSD: Dream Replay with CLIP Projection Stable Diffusion
 
-![Project Logo](resource\cpsd_block.png)
+![Project Logo](resource/cpsd_block.png)
 
 ---
 
